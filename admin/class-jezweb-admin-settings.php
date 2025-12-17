@@ -156,7 +156,7 @@ class Jezweb_Admin_Settings {
                 'id'          => 'enable_jetsearch',
                 'description' => __( 'Enable integration with Crocoblock JetSearch.', 'jezweb-search-result' ),
                 'plugin'      => 'JetSearch',
-                'active'      => defined( 'JET_SEARCH_VERSION' ),
+                'active'      => $this->is_jetsearch_active(),
             )
         );
 
@@ -170,7 +170,7 @@ class Jezweb_Admin_Settings {
                 'id'          => 'enable_jetfilters',
                 'description' => __( 'Enable integration with Crocoblock JetSmartFilters.', 'jezweb-search-result' ),
                 'plugin'      => 'JetSmartFilters',
-                'active'      => defined( 'JET_SMART_FILTERS_VERSION' ),
+                'active'      => $this->is_jetsmartfilters_active(),
             )
         );
 
@@ -481,5 +481,71 @@ class Jezweb_Admin_Settings {
             <?php esc_html_e( 'Select the sources from which the plugin should detect active filters.', 'jezweb-search-result' ); ?>
         </p>
         <?php
+    }
+
+    /**
+     * Check if JetSearch is active.
+     *
+     * @return bool
+     */
+    private function is_jetsearch_active() {
+        // Check for various possible constants and classes
+        if ( defined( 'JET_SEARCH_VERSION' ) ) {
+            return true;
+        }
+
+        if ( class_exists( 'Jet_Search' ) ) {
+            return true;
+        }
+
+        // Check if plugin file exists
+        if ( function_exists( 'is_plugin_active' ) ) {
+            if ( is_plugin_active( 'jet-search/jet-search.php' ) ) {
+                return true;
+            }
+        }
+
+        // Check by looking for the plugin in active plugins
+        $active_plugins = get_option( 'active_plugins', array() );
+        foreach ( $active_plugins as $plugin ) {
+            if ( strpos( $plugin, 'jet-search' ) !== false ) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Check if JetSmartFilters is active.
+     *
+     * @return bool
+     */
+    private function is_jetsmartfilters_active() {
+        // Check for various possible constants and classes
+        if ( defined( 'JET_SMART_FILTERS_VERSION' ) ) {
+            return true;
+        }
+
+        if ( class_exists( 'Jet_Smart_Filters' ) ) {
+            return true;
+        }
+
+        // Check if plugin file exists
+        if ( function_exists( 'is_plugin_active' ) ) {
+            if ( is_plugin_active( 'jet-smart-filters/jet-smart-filters.php' ) ) {
+                return true;
+            }
+        }
+
+        // Check by looking for the plugin in active plugins
+        $active_plugins = get_option( 'active_plugins', array() );
+        foreach ( $active_plugins as $plugin ) {
+            if ( strpos( $plugin, 'jet-smart-filters' ) !== false ) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

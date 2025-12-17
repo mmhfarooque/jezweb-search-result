@@ -201,14 +201,14 @@ class Jezweb_WooCommerce_Integration {
         }
 
         // Check current archive context.
-        if ( is_product_category() ) {
+        if ( function_exists( 'is_product_category' ) && is_product_category() ) {
             $term = get_queried_object();
             if ( $term && isset( $term->slug ) ) {
                 $filters['categories'][] = $term->slug;
             }
         }
 
-        if ( is_product_tag() ) {
+        if ( function_exists( 'is_product_tag' ) && is_product_tag() ) {
             $term = get_queried_object();
             if ( $term && isset( $term->slug ) ) {
                 $filters['tags'][] = $term->slug;
@@ -232,6 +232,11 @@ class Jezweb_WooCommerce_Integration {
      * @return array
      */
     private function get_layered_nav_filters( $filters ) {
+        // Check if WC_Query class exists.
+        if ( ! class_exists( 'WC_Query' ) || ! method_exists( 'WC_Query', 'get_layered_nav_chosen_attributes' ) ) {
+            return $filters;
+        }
+
         // Check for WooCommerce filter widgets.
         $filter_terms = WC_Query::get_layered_nav_chosen_attributes();
 

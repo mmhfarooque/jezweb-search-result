@@ -294,7 +294,19 @@ class Jezweb_Search_Filter {
     private function determine_category_taxonomy() {
         // Check if we're in WooCommerce context.
         if ( class_exists( 'WooCommerce' ) ) {
-            if ( is_shop() || is_product_category() || is_product_tag() || $this->is_product_search() ) {
+            $is_wc_context = false;
+
+            if ( function_exists( 'is_shop' ) && is_shop() ) {
+                $is_wc_context = true;
+            } elseif ( function_exists( 'is_product_category' ) && is_product_category() ) {
+                $is_wc_context = true;
+            } elseif ( function_exists( 'is_product_tag' ) && is_product_tag() ) {
+                $is_wc_context = true;
+            } elseif ( $this->is_product_search() ) {
+                $is_wc_context = true;
+            }
+
+            if ( $is_wc_context ) {
                 return 'product_cat';
             }
         }
@@ -310,7 +322,19 @@ class Jezweb_Search_Filter {
     private function determine_tag_taxonomy() {
         // Check if we're in WooCommerce context.
         if ( class_exists( 'WooCommerce' ) ) {
-            if ( is_shop() || is_product_category() || is_product_tag() || $this->is_product_search() ) {
+            $is_wc_context = false;
+
+            if ( function_exists( 'is_shop' ) && is_shop() ) {
+                $is_wc_context = true;
+            } elseif ( function_exists( 'is_product_category' ) && is_product_category() ) {
+                $is_wc_context = true;
+            } elseif ( function_exists( 'is_product_tag' ) && is_product_tag() ) {
+                $is_wc_context = true;
+            } elseif ( $this->is_product_search() ) {
+                $is_wc_context = true;
+            }
+
+            if ( $is_wc_context ) {
                 return 'product_tag';
             }
         }
@@ -553,7 +577,8 @@ class Jezweb_Search_Filter {
         );
 
         // Check if on category archive.
-        if ( is_category() || is_product_category() ) {
+        $is_category_archive = is_category() || ( function_exists( 'is_product_category' ) && is_product_category() );
+        if ( $is_category_archive ) {
             $term = get_queried_object();
             if ( $term && ! is_wp_error( $term ) && isset( $term->slug ) ) {
                 $filters['categories'][] = $term->slug;
@@ -561,7 +586,8 @@ class Jezweb_Search_Filter {
         }
 
         // Check if on tag archive.
-        if ( is_tag() || is_product_tag() ) {
+        $is_tag_archive = is_tag() || ( function_exists( 'is_product_tag' ) && is_product_tag() );
+        if ( $is_tag_archive ) {
             $term = get_queried_object();
             if ( $term && ! is_wp_error( $term ) && isset( $term->slug ) ) {
                 $filters['tags'][] = $term->slug;

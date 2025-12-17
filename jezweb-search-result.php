@@ -3,7 +3,7 @@
  * Plugin Name: Jezweb Search Result
  * Plugin URI: https://jezweb.com.au/plugins/jezweb-search-result
  * Description: Enhances WordPress search to respect active category and tag filters. Search results are scoped to currently selected categories/tags in product archives, working seamlessly with Elementor, JetSearch, JetSmartFilters, and default WordPress search.
- * Version: 1.0.0
+ * Version: 1.0.1
  * Author: Jezweb
  * Author URI: https://jezweb.com.au
  * Developer: Mahmud Farooque
@@ -28,7 +28,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 /**
  * Plugin constants
  */
-define( 'JEZWEB_SEARCH_RESULT_VERSION', '1.0.0' );
+define( 'JEZWEB_SEARCH_RESULT_VERSION', '1.0.1' );
 define( 'JEZWEB_SEARCH_RESULT_PLUGIN_FILE', __FILE__ );
 define( 'JEZWEB_SEARCH_RESULT_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'JEZWEB_SEARCH_RESULT_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
@@ -329,7 +329,15 @@ final class Jezweb_Search_Result {
         }
 
         // Check if on product archive, shop page, or search page.
-        if ( function_exists( 'is_shop' ) && ( is_shop() || is_product_category() || is_product_tag() ) ) {
+        if ( function_exists( 'is_shop' ) && is_shop() ) {
+            return true;
+        }
+
+        if ( function_exists( 'is_product_category' ) && is_product_category() ) {
+            return true;
+        }
+
+        if ( function_exists( 'is_product_tag' ) && is_product_tag() ) {
             return true;
         }
 
@@ -395,18 +403,18 @@ final class Jezweb_Search_Result {
             }
         }
 
-        // Check for category archives.
-        if ( is_product_category() ) {
+        // Check for category archives (WooCommerce).
+        if ( function_exists( 'is_product_category' ) && is_product_category() ) {
             $term = get_queried_object();
-            if ( $term && ! is_wp_error( $term ) ) {
+            if ( $term && ! is_wp_error( $term ) && isset( $term->slug ) ) {
                 $filters['categories'][] = $term->slug;
             }
         }
 
-        // Check for tag archives.
-        if ( is_product_tag() ) {
+        // Check for tag archives (WooCommerce).
+        if ( function_exists( 'is_product_tag' ) && is_product_tag() ) {
             $term = get_queried_object();
-            if ( $term && ! is_wp_error( $term ) ) {
+            if ( $term && ! is_wp_error( $term ) && isset( $term->slug ) ) {
                 $filters['tags'][] = $term->slug;
             }
         }
