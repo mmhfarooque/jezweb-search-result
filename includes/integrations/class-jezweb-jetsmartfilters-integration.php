@@ -33,6 +33,13 @@ class Jezweb_JetSmartFilters_Integration {
     private $current_search_term = '';
 
     /**
+     * Flag to prevent multiple SQL modifications.
+     *
+     * @var bool
+     */
+    private $sql_modified = false;
+
+    /**
      * Constructor.
      */
     public function __construct() {
@@ -199,56 +206,82 @@ class Jezweb_JetSmartFilters_Integration {
     public function filter_posts_where_for_search( $where, $query ) {
         global $wpdb;
 
-        // Only apply during JSF AJAX requests.
-        if ( ! wp_doing_ajax() ) {
-            return $where;
-        }
-
-        // Check if this is a JSF request.
-        // phpcs:ignore WordPress.Security.NonceVerification.Recommended
-        $action = isset( $_REQUEST['action'] ) ? sanitize_text_field( wp_unslash( $_REQUEST['action'] ) ) : '';
-        if ( 'jet_smart_filters' !== $action ) {
-            return $where;
-        }
-
-        // Get search term from our captured data or query.
-        $search_term = '';
-        if ( ! empty( $this->current_search_term ) ) {
-            $search_term = $this->current_search_term;
-        } elseif ( ! empty( $query->get( 's' ) ) ) {
-            $search_term = $query->get( 's' );
-        }
-
-        // If no search term, return original where clause.
-        if ( empty( $search_term ) ) {
-            return $where;
-        }
-
-        // Check if search is already applied in WHERE clause.
-        if ( stripos( $where, 'post_title LIKE' ) !== false || stripos( $where, 'post_content LIKE' ) !== false ) {
-            // Search already applied, skip.
-            if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
-                error_log( 'Jezweb Search Result: Search already in WHERE clause, skipping SQL injection' );
+        // Safety check - always return original where if anything goes wrong.
+        try {
+            // Prevent multiple modifications.
+            if ( $this->sql_modified ) {
+                return $where;
             }
-            return $where;
-        }
 
-        // Build search condition - search in title, content, and excerpt.
-        $search_term_escaped = '%' . $wpdb->esc_like( $search_term ) . '%';
+            // Only apply during JSF AJAX requests.
+            if ( ! wp_doing_ajax() ) {
+                return $where;
+            }
 
-        $search_where = $wpdb->prepare(
-            " AND ({$wpdb->posts}.post_title LIKE %s OR {$wpdb->posts}.post_content LIKE %s OR {$wpdb->posts}.post_excerpt LIKE %s)",
-            $search_term_escaped,
-            $search_term_escaped,
-            $search_term_escaped
-        );
+            // Check if this is a JSF request.
+            // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+            $action = isset( $_REQUEST['action'] ) ? sanitize_text_field( wp_unslash( $_REQUEST['action'] ) ) : '';
+            if ( 'jet_smart_filters' !== $action ) {
+                return $where;
+            }
 
-        $where .= $search_where;
+            // Ensure $query is a WP_Query object with get() method.
+            if ( ! is_object( $query ) || ! method_exists( $query, 'get' ) ) {
+                return $where;
+            }
 
-        // Debug logging.
-        if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
-            error_log( 'Jezweb Search Result: Added SQL search condition for term: ' . $search_term );
-            error_log( 'Jezweb Search Result: New WHERE clause: ' . substr( $where, -200 ) );
+            // Only apply to main product queries.
+            $post_type = $query->get( 'post_type' );
+            if ( ! empty( $post_type ) && 'product' !== $post_type && ! ( is_array( $post_type ) && in_array( 'product', $post_type, true ) ) ) {
+                return $where;
+            }
+
+            // Get search term from our captured data or query.
+            $search_term = '';
+            if ( ! empty( $this->current_search_term ) ) {
+                $search_term = $this->current_search_term;
+            } else {
+                $query_s = $query->get( 's' );
+                if ( ! empty( $query_s ) ) {
+                    $search_term = $query_s;
+                }
+            }
+
+            // If no search term, return original where clause.
+            if ( empty( $search_term ) ) {
+                return $where;
+            }
+
+            // Check if search is already applied in WHERE clause.
+            if ( stripos( $where, 'post_title LIKE' ) !== false || stripos( $where, 'post_content LIKE' ) !== false ) {
+                return $where;
+            }
+
+            // Build search condition - search in title, content, and excerpt.
+            $search_term_escaped = '%' . $wpdb->esc_like( $search_term ) . '%';
+
+            $search_where = $wpdb->prepare(
+                " AND ({$wpdb->posts}.post_title LIKE %s OR {$wpdb->posts}.post_content LIKE %s OR {$wpdb->posts}.post_excerpt LIKE %s)",
+                $search_term_escaped,
+                $search_term_escaped,
+                $search_term_escaped
+            );
+
+            $where .= $search_where;
+
+            // Mark as modified to prevent duplicate modifications.
+            $this->sql_modified = true;
+
+            // Debug logging.
+            if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+                error_log( 'Jezweb Search Result: Added SQL search condition for term: ' . $search_term );
+            }
+
+        } catch ( Exception $e ) {
+            // Log error but don't break the query.
+            if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+                error_log( 'Jezweb Search Result: Error in posts_where filter: ' . $e->getMessage() );
+            }
         }
 
         return $where;
