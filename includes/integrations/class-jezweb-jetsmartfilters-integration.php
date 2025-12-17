@@ -93,6 +93,9 @@ class Jezweb_JetSmartFilters_Integration {
         // Intercept JetSmartFilters AJAX request early.
         add_action( 'wp_ajax_jet_smart_filters', array( $this, 'intercept_jsf_ajax' ), 1 );
         add_action( 'wp_ajax_nopriv_jet_smart_filters', array( $this, 'intercept_jsf_ajax' ), 1 );
+
+        // Add posts_where filter to enforce search at SQL level.
+        add_filter( 'posts_where', array( $this, 'filter_posts_where_for_search' ), 999, 2 );
     }
 
     /**
@@ -183,6 +186,72 @@ class Jezweb_JetSmartFilters_Integration {
         if ( is_admin() && ! wp_doing_ajax() ) {
             return;
         }
+    }
+
+    /**
+     * Filter posts_where to enforce search term at SQL level.
+     * This ensures the search is applied even if JSF ignores the 's' parameter.
+     *
+     * @param string   $where    The WHERE clause of the query.
+     * @param WP_Query $query    The WP_Query instance.
+     * @return string
+     */
+    public function filter_posts_where_for_search( $where, $query ) {
+        global $wpdb;
+
+        // Only apply during JSF AJAX requests.
+        if ( ! wp_doing_ajax() ) {
+            return $where;
+        }
+
+        // Check if this is a JSF request.
+        // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+        $action = isset( $_REQUEST['action'] ) ? sanitize_text_field( wp_unslash( $_REQUEST['action'] ) ) : '';
+        if ( 'jet_smart_filters' !== $action ) {
+            return $where;
+        }
+
+        // Get search term from our captured data or query.
+        $search_term = '';
+        if ( ! empty( $this->current_search_term ) ) {
+            $search_term = $this->current_search_term;
+        } elseif ( ! empty( $query->get( 's' ) ) ) {
+            $search_term = $query->get( 's' );
+        }
+
+        // If no search term, return original where clause.
+        if ( empty( $search_term ) ) {
+            return $where;
+        }
+
+        // Check if search is already applied in WHERE clause.
+        if ( stripos( $where, 'post_title LIKE' ) !== false || stripos( $where, 'post_content LIKE' ) !== false ) {
+            // Search already applied, skip.
+            if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+                error_log( 'Jezweb Search Result: Search already in WHERE clause, skipping SQL injection' );
+            }
+            return $where;
+        }
+
+        // Build search condition - search in title, content, and excerpt.
+        $search_term_escaped = '%' . $wpdb->esc_like( $search_term ) . '%';
+
+        $search_where = $wpdb->prepare(
+            " AND ({$wpdb->posts}.post_title LIKE %s OR {$wpdb->posts}.post_content LIKE %s OR {$wpdb->posts}.post_excerpt LIKE %s)",
+            $search_term_escaped,
+            $search_term_escaped,
+            $search_term_escaped
+        );
+
+        $where .= $search_where;
+
+        // Debug logging.
+        if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+            error_log( 'Jezweb Search Result: Added SQL search condition for term: ' . $search_term );
+            error_log( 'Jezweb Search Result: New WHERE clause: ' . substr( $where, -200 ) );
+        }
+
+        return $where;
     }
 
     /**
