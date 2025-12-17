@@ -89,8 +89,16 @@ class Jezweb_WooCommerce_Integration {
      * @param WP_Query $query Query object.
      */
     public function modify_product_query( $query ) {
+        // Check if query object has is_search method.
+        $is_search = false;
+        if ( is_object( $query ) && method_exists( $query, 'is_search' ) ) {
+            $is_search = $query->is_search();
+        } elseif ( function_exists( 'is_search' ) && is_search() ) {
+            $is_search = true;
+        }
+
         // Don't modify if not a search query.
-        if ( ! $query->is_search() ) {
+        if ( ! $is_search ) {
             return;
         }
 
@@ -440,16 +448,16 @@ class Jezweb_WooCommerce_Integration {
         }
 
         if ( ! empty( $term_ids ) ) {
+            // Sanitize term IDs as integers for safe SQL.
             $term_ids_string = implode( ',', array_map( 'intval', $term_ids ) );
-            $where .= $wpdb->prepare(
-                " AND {$wpdb->posts}.ID IN (
-                    SELECT object_id FROM {$wpdb->term_relationships}
-                    WHERE term_taxonomy_id IN (
-                        SELECT term_taxonomy_id FROM {$wpdb->term_taxonomy}
-                        WHERE term_id IN ({$term_ids_string})
-                    )
-                )"
-            );
+            // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- $term_ids_string is safely sanitized with intval above.
+            $where .= " AND {$wpdb->posts}.ID IN (
+                SELECT object_id FROM {$wpdb->term_relationships}
+                WHERE term_taxonomy_id IN (
+                    SELECT term_taxonomy_id FROM {$wpdb->term_taxonomy}
+                    WHERE term_id IN ({$term_ids_string})
+                )
+            )";
         }
 
         return $where;
