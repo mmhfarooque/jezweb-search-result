@@ -1,0 +1,227 @@
+/**
+ * Jezweb Search Result - Admin Styles
+ *
+ * @package Jezweb_Search_Result
+ * @since 1.0.0
+ */
+
+/* Settings Page Layout */
+.jezweb-search-result-settings {
+    max-width: 1200px;
+}
+
+/* Header Section */
+.jezweb-settings-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    background: #fff;
+    padding: 20px;
+    margin: 20px 0;
+    border: 1px solid #ccd0d4;
+    border-radius: 4px;
+}
+
+.jezweb-settings-header .jezweb-logo h2 {
+    margin: 0 0 10px;
+    color: #1d2327;
+    font-size: 24px;
+}
+
+.jezweb-settings-header .jezweb-logo .description {
+    margin: 0;
+    font-size: 14px;
+    color: #646970;
+}
+
+.jezweb-settings-header .jezweb-info {
+    text-align: right;
+}
+
+.jezweb-settings-header .jezweb-info p {
+    margin: 5px 0;
+    font-size: 13px;
+}
+
+/* Form Sections */
+.jezweb-search-result-settings .form-table th {
+    width: 250px;
+    padding: 20px 10px 20px 0;
+}
+
+.jezweb-search-result-settings .form-table td {
+    padding: 15px 10px;
+}
+
+.jezweb-search-result-settings .form-table label {
+    display: inline-flex;
+    align-items: flex-start;
+    gap: 8px;
+}
+
+.jezweb-search-result-settings .form-table input[type="checkbox"] {
+    margin-top: 2px;
+}
+
+.jezweb-search-result-settings .form-table fieldset label {
+    display: flex;
+    margin-bottom: 8px;
+}
+
+.jezweb-search-result-settings .form-table code {
+    background: #f0f0f1;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 12px;
+}
+
+/* Plugin Status Badges */
+.jezweb-plugin-status {
+    display: inline-block;
+    padding: 3px 8px;
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: 500;
+    margin-left: 10px;
+    text-transform: uppercase;
+}
+
+.jezweb-plugin-active {
+    background: #d4edda;
+    color: #155724;
+    border: 1px solid #c3e6cb;
+}
+
+.jezweb-plugin-inactive {
+    background: #fff3cd;
+    color: #856404;
+    border: 1px solid #ffeeba;
+}
+
+/* Section Headers */
+.jezweb-search-result-settings h2 {
+    font-size: 18px;
+    font-weight: 600;
+    border-bottom: 1px solid #ccd0d4;
+    padding-bottom: 10px;
+    margin-top: 30px;
+}
+
+.jezweb-search-result-settings h2:first-of-type {
+    margin-top: 0;
+}
+
+/* Footer Section */
+.jezweb-settings-footer {
+    background: #f6f7f7;
+    padding: 20px;
+    margin-top: 30px;
+    border: 1px solid #ccd0d4;
+    border-radius: 4px;
+}
+
+.jezweb-settings-footer h3 {
+    margin-top: 0;
+    font-size: 15px;
+    color: #1d2327;
+}
+
+.jezweb-settings-footer h3:not(:first-child) {
+    margin-top: 25px;
+}
+
+.jezweb-settings-footer ol,
+.jezweb-settings-footer ul {
+    margin: 10px 0;
+    padding-left: 20px;
+}
+
+.jezweb-settings-footer li {
+    margin-bottom: 8px;
+    line-height: 1.6;
+}
+
+/* Submit Button */
+.jezweb-search-result-settings .submit {
+    margin-top: 20px;
+    padding-top: 20px;
+    border-top: 1px solid #ccd0d4;
+}
+
+.jezweb-search-result-settings .submit .button-primary {
+    padding: 5px 20px;
+    height: auto;
+}
+
+/* Responsive */
+@media screen and (max-width: 782px) {
+    .jezweb-settings-header {
+        flex-direction: column;
+    }
+
+    .jezweb-settings-header .jezweb-info {
+        text-align: left;
+        margin-top: 15px;
+    }
+
+    .jezweb-search-result-settings .form-table th {
+        width: auto;
+        display: block;
+        padding-bottom: 5px;
+    }
+
+    .jezweb-search-result-settings .form-table td {
+        display: block;
+        padding-top: 0;
+    }
+}
+
+/* Notice Styles */
+.jezweb-search-result-settings .notice {
+    margin: 15px 0;
+}
+
+/* Description Text */
+.jezweb-search-result-settings p.description {
+    margin-top: 8px;
+    font-style: normal;
+    color: #646970;
+}
+
+/* Checkbox Groups */
+.jezweb-search-result-settings fieldset {
+    padding: 10px 15px;
+    background: #f9f9f9;
+    border: 1px solid #e5e5e5;
+    border-radius: 4px;
+}
+
+.jezweb-search-result-settings fieldset label:last-child {
+    margin-bottom: 0;
+}
+
+/* Text Input Styling */
+.jezweb-search-result-settings input[type="text"].regular-text {
+    max-width: 300px;
+}
+
+/* Links */
+.jezweb-search-result-settings a {
+    color: #2271b1;
+    text-decoration: none;
+}
+
+.jezweb-search-result-settings a:hover {
+    color: #135e96;
+    text-decoration: underline;
+}
+
+/* Disabled State */
+.jezweb-search-result-settings input:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.jezweb-search-result-settings input:disabled + .jezweb-plugin-status {
+    opacity: 0.8;
+}

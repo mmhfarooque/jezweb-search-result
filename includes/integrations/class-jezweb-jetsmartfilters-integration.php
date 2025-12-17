@@ -1,0 +1,507 @@
+<?php
+/**
+ * JetSmartFilters Integration Class
+ *
+ * Handles integration with Crocoblock JetSmartFilters plugin.
+ *
+ * @package Jezweb_Search_Result
+ * @since 1.0.0
+ */
+
+// Exit if accessed directly.
+if ( ! defined( 'ABSPATH' ) ) {
+    exit;
+}
+
+/**
+ * Jezweb_JetSmartFilters_Integration class.
+ */
+class Jezweb_JetSmartFilters_Integration {
+
+    /**
+     * Constructor.
+     */
+    public function __construct() {
+        // Check if JetSmartFilters is active.
+        if ( ! $this->is_jsf_active() ) {
+            return;
+        }
+
+        $this->init_hooks();
+    }
+
+    /**
+     * Check if JetSmartFilters is active.
+     *
+     * @return bool
+     */
+    private function is_jsf_active() {
+        return defined( 'JET_SMART_FILTERS_VERSION' ) || class_exists( 'Jet_Smart_Filters' );
+    }
+
+    /**
+     * Check if integration is enabled.
+     *
+     * @return bool
+     */
+    private function is_enabled() {
+        $settings = get_option( 'jezweb_search_result_settings', array() );
+        return isset( $settings['enable_jetfilters'] ) ? $settings['enable_jetfilters'] : true;
+    }
+
+    /**
+     * Initialize hooks.
+     */
+    private function init_hooks() {
+        if ( ! $this->is_enabled() ) {
+            return;
+        }
+
+        // Hook into JetSmartFilters query.
+        add_filter( 'jet-smart-filters/query/final-query', array( $this, 'capture_jsf_query' ), 99 );
+
+        // Hook into filter state changes.
+        add_action( 'jet-smart-filters/filter-instance/update', array( $this, 'on_filter_update' ) );
+
+        // Add JavaScript for detecting JSF filter changes.
+        add_action( 'wp_footer', array( $this, 'add_jsf_enhancements' ), 25 );
+
+        // Store active filters for search integration.
+        add_action( 'wp_ajax_jezweb_sync_jsf_filters', array( $this, 'sync_jsf_filters' ) );
+        add_action( 'wp_ajax_nopriv_jezweb_sync_jsf_filters', array( $this, 'sync_jsf_filters' ) );
+
+        // Add data attribute to archive wrappers.
+        add_action( 'jet-smart-filters/render/provider-wrapper-attributes', array( $this, 'add_provider_data' ), 10, 2 );
+    }
+
+    /**
+     * Capture JetSmartFilters query to extract active filters.
+     *
+     * @param array $query Query arguments.
+     * @return array
+     */
+    public function capture_jsf_query( $query ) {
+        // Extract taxonomy filters from query.
+        if ( isset( $query['tax_query'] ) && is_array( $query['tax_query'] ) ) {
+            $filters = array(
+                'categories' => array(),
+                'tags'       => array(),
+                'taxonomies' => array(),
+            );
+
+            foreach ( $query['tax_query'] as $tax_query ) {
+                if ( ! is_array( $tax_query ) || ! isset( $tax_query['taxonomy'] ) ) {
+                    continue;
+                }
+
+                $taxonomy = $tax_query['taxonomy'];
+                $terms    = isset( $tax_query['terms'] ) ? (array) $tax_query['terms'] : array();
+
+                if ( empty( $terms ) ) {
+                    continue;
+                }
+
+                // Categorize by taxonomy type.
+                if ( in_array( $taxonomy, array( 'product_cat', 'category' ), true ) ) {
+                    $filters['categories'] = array_merge( $filters['categories'], $terms );
+                } elseif ( in_array( $taxonomy, array( 'product_tag', 'post_tag' ), true ) ) {
+                    $filters['tags'] = array_merge( $filters['tags'], $terms );
+                } else {
+                    $key = 'jsf_' . $taxonomy;
+                    if ( ! isset( $filters['taxonomies'][ $key ] ) ) {
+                        $filters['taxonomies'][ $key ] = array();
+                    }
+                    $filters['taxonomies'][ $key ] = array_merge( $filters['taxonomies'][ $key ], $terms );
+                }
+            }
+
+            // Store for search integration.
+            $this->store_active_filters( $filters );
+        }
+
+        return $query;
+    }
+
+    /**
+     * Handle filter update event.
+     *
+     * @param object $filter_instance Filter instance.
+     */
+    public function on_filter_update( $filter_instance ) {
+        // This is called when a filter is updated.
+        // We'll rely on JavaScript to detect changes and sync.
+    }
+
+    /**
+     * Store active filters in transient.
+     *
+     * @param array $filters Filter data.
+     */
+    private function store_active_filters( $filters ) {
+        $user_id       = get_current_user_id();
+        $transient_key = 'jezweb_search_filters_' . ( $user_id ? $user_id : md5( $this->get_client_ip() ) );
+
+        // Merge with existing filters.
+        $existing = get_transient( $transient_key );
+        if ( is_array( $existing ) ) {
+            $filters['categories'] = array_unique( array_merge(
+                isset( $existing['categories'] ) ? (array) $existing['categories'] : array(),
+                $filters['categories']
+            ) );
+            $filters['tags'] = array_unique( array_merge(
+                isset( $existing['tags'] ) ? (array) $existing['tags'] : array(),
+                $filters['tags']
+            ) );
+            $filters['taxonomies'] = array_merge(
+                isset( $existing['taxonomies'] ) ? (array) $existing['taxonomies'] : array(),
+                $filters['taxonomies']
+            );
+        }
+
+        set_transient( $transient_key, $filters, HOUR_IN_SECONDS );
+    }
+
+    /**
+     * Get client IP address.
+     *
+     * @return string
+     */
+    private function get_client_ip() {
+        $ip = '';
+
+        if ( ! empty( $_SERVER['HTTP_CLIENT_IP'] ) ) {
+            $ip = sanitize_text_field( wp_unslash( $_SERVER['HTTP_CLIENT_IP'] ) );
+        } elseif ( ! empty( $_SERVER['HTTP_X_FORWARDED_FOR'] ) ) {
+            $ip = sanitize_text_field( wp_unslash( $_SERVER['HTTP_X_FORWARDED_FOR'] ) );
+        } elseif ( ! empty( $_SERVER['REMOTE_ADDR'] ) ) {
+            $ip = sanitize_text_field( wp_unslash( $_SERVER['REMOTE_ADDR'] ) );
+        }
+
+        return $ip;
+    }
+
+    /**
+     * AJAX handler to sync JSF filters.
+     */
+    public function sync_jsf_filters() {
+        // Verify nonce.
+        if ( ! check_ajax_referer( 'jezweb_search_result_nonce', 'nonce', false ) ) {
+            wp_send_json_error( array( 'message' => 'Security check failed.' ) );
+        }
+
+        $filters = array(
+            'categories' => array(),
+            'tags'       => array(),
+            'taxonomies' => array(),
+        );
+
+        // Get filters from POST data.
+        if ( isset( $_POST['filters'] ) ) {
+            $posted = json_decode( stripslashes( sanitize_text_field( wp_unslash( $_POST['filters'] ) ) ), true );
+            if ( is_array( $posted ) ) {
+                if ( isset( $posted['categories'] ) ) {
+                    $filters['categories'] = array_map( 'sanitize_text_field', (array) $posted['categories'] );
+                }
+                if ( isset( $posted['tags'] ) ) {
+                    $filters['tags'] = array_map( 'sanitize_text_field', (array) $posted['tags'] );
+                }
+                if ( isset( $posted['taxonomies'] ) ) {
+                    foreach ( (array) $posted['taxonomies'] as $tax => $terms ) {
+                        $filters['taxonomies'][ sanitize_key( $tax ) ] = array_map( 'sanitize_text_field', (array) $terms );
+                    }
+                }
+            }
+        }
+
+        // Store filters.
+        $this->store_active_filters( $filters );
+
+        wp_send_json_success( array(
+            'message' => 'Filters synced.',
+            'filters' => $filters,
+        ) );
+    }
+
+    /**
+     * Add data attributes to provider wrapper.
+     *
+     * @param array  $attributes Existing attributes.
+     * @param string $provider   Provider name.
+     * @return array
+     */
+    public function add_provider_data( $attributes, $provider ) {
+        $attributes['data-jezweb-jsf-provider'] = $provider;
+        return $attributes;
+    }
+
+    /**
+     * Add JavaScript for JetSmartFilters integration.
+     */
+    public function add_jsf_enhancements() {
+        if ( ! $this->is_jsf_active() ) {
+            return;
+        }
+        ?>
+        <script type="text/javascript">
+        (function($) {
+            'use strict';
+
+            if (typeof $ === 'undefined') {
+                return;
+            }
+
+            var syncDebounceTimer = null;
+
+            /**
+             * Extract filters from JetSmartFilters state
+             */
+            function extractJSFFilters() {
+                var filters = {
+                    categories: [],
+                    tags: [],
+                    taxonomies: {}
+                };
+
+                // Method 1: Check JetSmartFilters global object
+                if (typeof window.JetSmartFilters !== 'undefined') {
+                    try {
+                        var filterGroups = window.JetSmartFilters.filterGroups || {};
+
+                        for (var groupId in filterGroups) {
+                            if (!filterGroups.hasOwnProperty(groupId)) continue;
+
+                            var group = filterGroups[groupId];
+                            var activeFilters = group.activeFilters || group.filters || {};
+
+                            for (var filterId in activeFilters) {
+                                if (!activeFilters.hasOwnProperty(filterId)) continue;
+
+                                var filter = activeFilters[filterId];
+                                var queryVar = filter.queryVar || filter.query_var || '';
+                                var value = filter.value || filter.current_value || '';
+
+                                if (!queryVar || !value) continue;
+
+                                var values = Array.isArray(value) ? value : [value];
+                                values = values.filter(function(v) { return v !== '' && v !== '0'; });
+
+                                if (values.length === 0) continue;
+
+                                if (queryVar.indexOf('cat') !== -1 || queryVar === 'category') {
+                                    filters.categories = filters.categories.concat(values);
+                                } else if (queryVar.indexOf('tag') !== -1) {
+                                    filters.tags = filters.tags.concat(values);
+                                } else {
+                                    var key = 'jsf_' + queryVar;
+                                    if (!filters.taxonomies[key]) {
+                                        filters.taxonomies[key] = [];
+                                    }
+                                    filters.taxonomies[key] = filters.taxonomies[key].concat(values);
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        console.warn('Jezweb Search Result: Error reading JetSmartFilters state', e);
+                    }
+                }
+
+                // Method 2: Read from DOM elements
+                var jsfCheckboxes = document.querySelectorAll('.jet-checkboxes-list__input:checked, .jet-radio-list__input:checked');
+                jsfCheckboxes.forEach(function(input) {
+                    var value = input.value;
+                    if (!value || value === '' || value === '0') return;
+
+                    var filterWrap = input.closest('.jet-filter, [data-content-id], .jet-smart-filters-checkbox, .jet-smart-filters-radio');
+                    var taxonomy = '';
+
+                    if (filterWrap) {
+                        taxonomy = filterWrap.getAttribute('data-query-var') ||
+                                  filterWrap.getAttribute('data-taxonomy') ||
+                                  input.name.replace('[]', '');
+                    }
+
+                    if (!taxonomy) {
+                        taxonomy = input.name.replace('[]', '');
+                    }
+
+                    if (taxonomy.indexOf('cat') !== -1 || taxonomy === 'category') {
+                        filters.categories.push(value);
+                    } else if (taxonomy.indexOf('tag') !== -1) {
+                        filters.tags.push(value);
+                    } else if (taxonomy) {
+                        var key = 'jsf_' + taxonomy;
+                        if (!filters.taxonomies[key]) {
+                            filters.taxonomies[key] = [];
+                        }
+                        filters.taxonomies[key].push(value);
+                    }
+                });
+
+                // Method 3: Read from select elements
+                var jsfSelects = document.querySelectorAll('.jet-select__control, .jet-smart-filters-select select');
+                jsfSelects.forEach(function(select) {
+                    var value = select.value;
+                    if (!value || value === '' || value === '0' || value === '-1') return;
+
+                    var filterWrap = select.closest('.jet-filter, [data-content-id]');
+                    var taxonomy = '';
+
+                    if (filterWrap) {
+                        taxonomy = filterWrap.getAttribute('data-query-var') ||
+                                  filterWrap.getAttribute('data-taxonomy') ||
+                                  select.name;
+                    }
+
+                    if (!taxonomy) {
+                        taxonomy = select.name;
+                    }
+
+                    if (taxonomy.indexOf('cat') !== -1) {
+                        filters.categories.push(value);
+                    } else if (taxonomy.indexOf('tag') !== -1) {
+                        filters.tags.push(value);
+                    } else if (taxonomy) {
+                        var key = 'jsf_' + taxonomy;
+                        if (!filters.taxonomies[key]) {
+                            filters.taxonomies[key] = [];
+                        }
+                        filters.taxonomies[key].push(value);
+                    }
+                });
+
+                // Method 4: Read active tags
+                var activeTags = document.querySelectorAll('.jet-active-tag:not(.jet-active-tag--all)');
+                activeTags.forEach(function(tag) {
+                    var value = tag.getAttribute('data-value');
+                    var taxonomy = tag.getAttribute('data-query-var') || tag.getAttribute('data-taxonomy');
+
+                    if (!value || !taxonomy) return;
+
+                    if (taxonomy.indexOf('cat') !== -1) {
+                        filters.categories.push(value);
+                    } else if (taxonomy.indexOf('tag') !== -1) {
+                        filters.tags.push(value);
+                    } else {
+                        var key = 'jsf_' + taxonomy;
+                        if (!filters.taxonomies[key]) {
+                            filters.taxonomies[key] = [];
+                        }
+                        filters.taxonomies[key].push(value);
+                    }
+                });
+
+                // Remove duplicates
+                filters.categories = [...new Set(filters.categories)];
+                filters.tags = [...new Set(filters.tags)];
+
+                for (var taxKey in filters.taxonomies) {
+                    filters.taxonomies[taxKey] = [...new Set(filters.taxonomies[taxKey])];
+                }
+
+                return filters;
+            }
+
+            /**
+             * Sync filters to server
+             */
+            function syncFiltersToServer(filters) {
+                if (typeof jezwebSearchResult === 'undefined') {
+                    return;
+                }
+
+                $.ajax({
+                    url: jezwebSearchResult.ajaxUrl,
+                    type: 'POST',
+                    data: {
+                        action: 'jezweb_sync_jsf_filters',
+                        nonce: jezwebSearchResult.nonce,
+                        filters: JSON.stringify(filters)
+                    },
+                    success: function(response) {
+                        if (jezwebSearchResult.debug) {
+                            console.log('Jezweb Search Result: Filters synced', response);
+                        }
+                    }
+                });
+            }
+
+            /**
+             * Handle filter changes
+             */
+            function onFilterChange() {
+                // Debounce to prevent excessive calls
+                clearTimeout(syncDebounceTimer);
+                syncDebounceTimer = setTimeout(function() {
+                    var filters = extractJSFFilters();
+
+                    // Update global detected filters
+                    if (typeof window.jezwebDetectedFilters !== 'undefined') {
+                        window.jezwebDetectedFilters.categories = [
+                            ...new Set([...window.jezwebDetectedFilters.categories, ...filters.categories])
+                        ];
+                        window.jezwebDetectedFilters.tags = [
+                            ...new Set([...window.jezwebDetectedFilters.tags, ...filters.tags])
+                        ];
+                        window.jezwebDetectedFilters.taxonomies = Object.assign(
+                            {},
+                            window.jezwebDetectedFilters.taxonomies,
+                            filters.taxonomies
+                        );
+                    } else {
+                        window.jezwebDetectedFilters = filters;
+                    }
+
+                    // Sync to server
+                    syncFiltersToServer(filters);
+
+                    // Trigger custom event
+                    document.dispatchEvent(new CustomEvent('jezweb-jsf-filters-updated', {
+                        detail: filters
+                    }));
+
+                }, 150);
+            }
+
+            // Listen for JetSmartFilters events
+            $(document).on('jet-smart-filters/inited', function() {
+                onFilterChange();
+            });
+
+            $(document).on('jet-filter-data-updated', function() {
+                onFilterChange();
+            });
+
+            $(document).on('jet-smart-filters/before-ajax-request', function() {
+                onFilterChange();
+            });
+
+            // Listen for checkbox/radio/select changes
+            $(document).on('change', '.jet-checkboxes-list__input, .jet-radio-list__input, .jet-select__control', function() {
+                onFilterChange();
+            });
+
+            // Listen for active tag removal
+            $(document).on('click', '.jet-active-tag__remove, .jet-active-tags__clear', function() {
+                setTimeout(onFilterChange, 100);
+            });
+
+            // Initial extraction
+            $(document).ready(function() {
+                setTimeout(onFilterChange, 500);
+            });
+
+            // Re-extract after AJAX
+            $(document).ajaxComplete(function(event, xhr, settings) {
+                if (settings.url && settings.url.indexOf('jet-smart-filters') !== -1) {
+                    setTimeout(onFilterChange, 100);
+                }
+            });
+
+            // Expose extraction function globally
+            window.jezwebExtractJSFFilters = extractJSFFilters;
+
+        })(jQuery);
+        </script>
+        <?php
+    }
+}

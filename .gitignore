@@ -1,0 +1,65 @@
+# IDE and Editor files
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
+.project
+.settings/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Node modules (if using build tools)
+node_modules/
+package-lock.json
+yarn.lock
+
+# Composer (if used)
+vendor/
+composer.lock
+
+# Build artifacts
+dist/
+build/
+*.zip
+
+# Log files
+*.log
+debug.log
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Cache files
+*.cache
+.phpunit.result.cache
+
+# Test coverage
+coverage/
+.nyc_output/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.bak
+
+# WordPress specific
+wp-config.php
+wp-content/uploads/
+wp-content/upgrade/
+wp-content/cache/
+
+# Plugin specific
+languages/*.pot

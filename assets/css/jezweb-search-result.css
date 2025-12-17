@@ -1,0 +1,209 @@
+/**
+ * Jezweb Search Result - Frontend Styles
+ *
+ * Minimal styles for enhanced search functionality.
+ * Most styling is handled by the theme and search widget plugins.
+ *
+ * @package Jezweb_Search_Result
+ * @since 1.0.0
+ */
+
+/* Enhanced Search Form Indicator (for debugging) */
+.jezweb-enhanced-search.jezweb-debug {
+    position: relative;
+}
+
+.jezweb-enhanced-search.jezweb-debug::after {
+    content: "Jezweb Enhanced";
+    position: absolute;
+    top: -20px;
+    right: 0;
+    font-size: 10px;
+    background: #28a745;
+    color: #fff;
+    padding: 2px 6px;
+    border-radius: 3px;
+    pointer-events: none;
+}
+
+/* Active Filter Indicator */
+.jezweb-filter-active {
+    position: relative;
+}
+
+.jezweb-filter-active::before {
+    content: "";
+    position: absolute;
+    top: -2px;
+    right: -2px;
+    width: 8px;
+    height: 8px;
+    background: #28a745;
+    border-radius: 50%;
+    border: 2px solid #fff;
+}
+
+/* Search Results Message */
+.jezweb-search-scope-notice {
+    background: #f8f9fa;
+    border-left: 4px solid #007cba;
+    padding: 12px 15px;
+    margin-bottom: 20px;
+    font-size: 14px;
+    color: #1d2327;
+}
+
+.jezweb-search-scope-notice strong {
+    color: #007cba;
+}
+
+.jezweb-search-scope-notice .jezweb-filter-list {
+    margin: 5px 0 0;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.jezweb-search-scope-notice .jezweb-filter-item {
+    display: inline-block;
+    background: #e7f3ff;
+    padding: 3px 10px;
+    border-radius: 15px;
+    font-size: 12px;
+    color: #0066cc;
+}
+
+/* Clear Filters Link */
+.jezweb-clear-filters {
+    display: inline-block;
+    margin-top: 10px;
+    color: #dc3545;
+    text-decoration: none;
+    font-size: 13px;
+}
+
+.jezweb-clear-filters:hover {
+    text-decoration: underline;
+}
+
+/* Hidden Elements */
+.jezweb-hidden {
+    display: none !important;
+}
+
+/* Screen Reader Text */
+.jezweb-sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+/* Loading State */
+.jezweb-loading {
+    opacity: 0.6;
+    pointer-events: none;
+}
+
+.jezweb-loading::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 20px;
+    height: 20px;
+    margin: -10px 0 0 -10px;
+    border: 2px solid #e5e5e5;
+    border-top-color: #007cba;
+    border-radius: 50%;
+    animation: jezweb-spin 0.8s linear infinite;
+}
+
+@keyframes jezweb-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* No Results Message */
+.jezweb-no-results {
+    text-align: center;
+    padding: 40px 20px;
+    background: #f8f9fa;
+    border-radius: 4px;
+}
+
+.jezweb-no-results p {
+    margin: 0 0 15px;
+    font-size: 16px;
+    color: #666;
+}
+
+.jezweb-no-results .jezweb-search-all {
+    display: inline-block;
+    padding: 8px 20px;
+    background: #007cba;
+    color: #fff;
+    text-decoration: none;
+    border-radius: 4px;
+    transition: background 0.2s;
+}
+
+.jezweb-no-results .jezweb-search-all:hover {
+    background: #005a8c;
+}
+
+/* Filter Marker Data Attribute (invisible) */
+[data-jezweb-current-term] {
+    display: none !important;
+    visibility: hidden;
+    position: absolute;
+    width: 0;
+    height: 0;
+    overflow: hidden;
+}
+
+/* Accessibility - Focus States */
+.jezweb-enhanced-search input:focus,
+.jezweb-enhanced-search button:focus {
+    outline: 2px solid #007cba;
+    outline-offset: 2px;
+}
+
+/* Print Styles */
+@media print {
+    .jezweb-search-scope-notice {
+        border-left-color: #000;
+        background: #f5f5f5;
+    }
+
+    .jezweb-search-scope-notice .jezweb-filter-item {
+        background: #e5e5e5;
+        color: #000;
+    }
+}
+
+/* High Contrast Mode Support */
+@media (prefers-contrast: high) {
+    .jezweb-search-scope-notice {
+        border-left-width: 6px;
+    }
+
+    .jezweb-search-scope-notice .jezweb-filter-item {
+        border: 1px solid currentColor;
+    }
+}
+
+/* Reduced Motion Support */
+@media (prefers-reduced-motion: reduce) {
+    .jezweb-loading::after {
+        animation: none;
+    }
+}
