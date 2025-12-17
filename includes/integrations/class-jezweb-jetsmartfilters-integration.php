@@ -26,6 +26,13 @@ class Jezweb_JetSmartFilters_Integration {
     private $current_tax_filters = array();
 
     /**
+     * Search term from current AJAX request.
+     *
+     * @var string
+     */
+    private $current_search_term = '';
+
+    /**
      * Constructor.
      */
     public function __construct() {
@@ -92,8 +99,9 @@ class Jezweb_JetSmartFilters_Integration {
      * Intercept JSF AJAX request early to capture filter data.
      */
     public function intercept_jsf_ajax() {
-        // Capture filter data from the AJAX request for use in query modification.
         // phpcs:ignore WordPress.Security.NonceVerification.Missing -- JSF handles its own nonce.
+
+        // Capture filter data from the AJAX request for use in query modification.
         if ( isset( $_POST['query'] ) ) {
             // phpcs:ignore WordPress.Security.NonceVerification.Missing
             $query_data = $_POST['query'];
@@ -101,9 +109,55 @@ class Jezweb_JetSmartFilters_Integration {
                 $query_data = json_decode( stripslashes( $query_data ), true );
             }
 
-            if ( is_array( $query_data ) && isset( $query_data['tax_query'] ) ) {
-                $this->current_tax_filters = $query_data['tax_query'];
+            if ( is_array( $query_data ) ) {
+                if ( isset( $query_data['tax_query'] ) ) {
+                    $this->current_tax_filters = $query_data['tax_query'];
+                }
+                // Capture search term from query.
+                if ( isset( $query_data['s'] ) ) {
+                    $this->current_search_term = sanitize_text_field( $query_data['s'] );
+                }
+                if ( isset( $query_data['_s'] ) ) {
+                    $this->current_search_term = sanitize_text_field( $query_data['_s'] );
+                }
             }
+        }
+
+        // Also check for search in filters array.
+        // phpcs:ignore WordPress.Security.NonceVerification.Missing
+        if ( isset( $_POST['filters'] ) ) {
+            // phpcs:ignore WordPress.Security.NonceVerification.Missing
+            $filters_data = $_POST['filters'];
+            if ( is_string( $filters_data ) ) {
+                $filters_data = json_decode( stripslashes( $filters_data ), true );
+            }
+
+            if ( is_array( $filters_data ) ) {
+                foreach ( $filters_data as $filter ) {
+                    if ( is_array( $filter ) ) {
+                        // Check for search filter type.
+                        if ( isset( $filter['query_type'] ) && '_s' === $filter['query_type'] && ! empty( $filter['query_val'] ) ) {
+                            $this->current_search_term = sanitize_text_field( $filter['query_val'] );
+                        }
+                        // Also check query_var.
+                        if ( isset( $filter['query_var'] ) && in_array( $filter['query_var'], array( 's', '_s', 'search', 'query' ), true ) && ! empty( $filter['query_val'] ) ) {
+                            $this->current_search_term = sanitize_text_field( $filter['query_val'] );
+                        }
+                    }
+                }
+            }
+        }
+
+        // Check direct POST parameters for search.
+        // phpcs:ignore WordPress.Security.NonceVerification.Missing
+        if ( empty( $this->current_search_term ) && isset( $_POST['search'] ) ) {
+            // phpcs:ignore WordPress.Security.NonceVerification.Missing
+            $this->current_search_term = sanitize_text_field( wp_unslash( $_POST['search'] ) );
+        }
+
+        // Debug log.
+        if ( defined( 'WP_DEBUG' ) && WP_DEBUG && ! empty( $this->current_search_term ) ) {
+            error_log( 'Jezweb Search Result: Captured search term from JSF AJAX: ' . $this->current_search_term );
         }
     }
 
@@ -138,8 +192,22 @@ class Jezweb_JetSmartFilters_Integration {
      * @return array
      */
     public function modify_jsf_query( $query ) {
-        // Check if this is a search query.
-        $is_search = ! empty( $query['s'] );
+        // Get search term from query or from captured AJAX data.
+        $search_term = '';
+        if ( ! empty( $query['s'] ) ) {
+            $search_term = $query['s'];
+        } elseif ( ! empty( $query['_s'] ) ) {
+            $search_term = $query['_s'];
+        } elseif ( ! empty( $this->current_search_term ) ) {
+            $search_term = $this->current_search_term;
+        }
+
+        $is_search = ! empty( $search_term );
+
+        // If we have a search term but it's not in the query, add it.
+        if ( $is_search && empty( $query['s'] ) ) {
+            $query['s'] = $search_term;
+        }
 
         // Get stored filters from our transient (set by JavaScript when checkboxes are clicked).
         $stored_filters = $this->get_stored_filters();
@@ -206,8 +274,13 @@ class Jezweb_JetSmartFilters_Integration {
 
             // Debug logging.
             if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
-                error_log( 'Jezweb Search Result: Modified JSF search query - search: ' . $query['s'] . ', categories: ' . implode( ',', $all_categories ) . ', tags: ' . implode( ',', $all_tags ) );
+                error_log( 'Jezweb Search Result: Modified JSF search query - search: ' . ( $query['s'] ?? 'none' ) . ', categories: ' . implode( ',', $all_categories ) . ', tags: ' . implode( ',', $all_tags ) );
             }
+        }
+
+        // Debug: Log the final query state.
+        if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+            error_log( 'Jezweb Search Result: Final JSF query - s: ' . ( $query['s'] ?? 'none' ) . ', has_tax_query: ' . ( isset( $query['tax_query'] ) ? 'yes' : 'no' ) );
         }
 
         // Store current filters for other integrations.
