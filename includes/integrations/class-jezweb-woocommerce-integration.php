@@ -84,11 +84,32 @@ class Jezweb_WooCommerce_Integration {
     }
 
     /**
+     * Check if current request is a JetSmartFilters AJAX request.
+     *
+     * @return bool
+     */
+    private function is_jsf_ajax_request() {
+        if ( ! wp_doing_ajax() ) {
+            return false;
+        }
+
+        // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+        $action = isset( $_REQUEST['action'] ) ? sanitize_text_field( wp_unslash( $_REQUEST['action'] ) ) : '';
+
+        return 'jet_smart_filters' === $action;
+    }
+
+    /**
      * Modify WooCommerce product query.
      *
      * @param WP_Query $query Query object.
      */
     public function modify_product_query( $query ) {
+        // Don't interfere with JetSmartFilters AJAX requests.
+        if ( $this->is_jsf_ajax_request() ) {
+            return;
+        }
+
         // Check if query object has is_search method.
         $is_search = false;
         if ( is_object( $query ) && method_exists( $query, 'is_search' ) ) {

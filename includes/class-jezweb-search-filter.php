@@ -87,6 +87,22 @@ class Jezweb_Search_Filter {
     }
 
     /**
+     * Check if current request is a JetSmartFilters AJAX request.
+     *
+     * @return bool
+     */
+    private function is_jsf_ajax_request() {
+        if ( ! wp_doing_ajax() ) {
+            return false;
+        }
+
+        // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+        $action = isset( $_REQUEST['action'] ) ? sanitize_text_field( wp_unslash( $_REQUEST['action'] ) ) : '';
+
+        return 'jet_smart_filters' === $action;
+    }
+
+    /**
      * Modify the main search query to include taxonomy filters.
      *
      * @param WP_Query $query The query object.
@@ -94,6 +110,12 @@ class Jezweb_Search_Filter {
     public function modify_search_query( $query ) {
         // Don't modify admin queries.
         if ( is_admin() && ! wp_doing_ajax() ) {
+            return;
+        }
+
+        // Don't interfere with JetSmartFilters AJAX requests.
+        // JSF handles its own search + filter combination.
+        if ( $this->is_jsf_ajax_request() ) {
             return;
         }
 
@@ -141,6 +163,11 @@ class Jezweb_Search_Filter {
      * @return array
      */
     public function modify_wc_tax_query( $tax_query, $query ) {
+        // Don't interfere with JetSmartFilters AJAX requests.
+        if ( $this->is_jsf_ajax_request() ) {
+            return $tax_query;
+        }
+
         // Check if query object has is_search method and if it's a search query.
         $is_search = false;
         if ( is_object( $query ) && method_exists( $query, 'is_search' ) ) {

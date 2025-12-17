@@ -19,6 +19,13 @@ if ( ! defined( 'ABSPATH' ) ) {
 class Jezweb_JetSmartFilters_Integration {
 
     /**
+     * Active taxonomy filters from current request.
+     *
+     * @var array
+     */
+    private $current_tax_filters = array();
+
+    /**
      * Constructor.
      */
     public function __construct() {
@@ -57,8 +64,8 @@ class Jezweb_JetSmartFilters_Integration {
             return;
         }
 
-        // Hook into JetSmartFilters query.
-        add_filter( 'jet-smart-filters/query/final-query', array( $this, 'capture_jsf_query' ), 99 );
+        // Hook into JetSmartFilters query - high priority to capture and modify.
+        add_filter( 'jet-smart-filters/query/final-query', array( $this, 'modify_jsf_query' ), 5 );
 
         // Hook into filter state changes.
         add_action( 'jet-smart-filters/filter-instance/update', array( $this, 'on_filter_update' ) );
@@ -72,23 +79,74 @@ class Jezweb_JetSmartFilters_Integration {
 
         // Add data attribute to archive wrappers.
         add_action( 'jet-smart-filters/render/provider-wrapper-attributes', array( $this, 'add_provider_data' ), 10, 2 );
+
+        // Hook into pre_get_posts for JSF AJAX requests.
+        add_action( 'pre_get_posts', array( $this, 'handle_jsf_search_query' ), 5 );
+
+        // Intercept JetSmartFilters AJAX request early.
+        add_action( 'wp_ajax_jet_smart_filters', array( $this, 'intercept_jsf_ajax' ), 1 );
+        add_action( 'wp_ajax_nopriv_jet_smart_filters', array( $this, 'intercept_jsf_ajax' ), 1 );
     }
 
     /**
-     * Capture JetSmartFilters query to extract active filters.
+     * Intercept JSF AJAX request early to capture filter data.
+     */
+    public function intercept_jsf_ajax() {
+        // Capture filter data from the AJAX request for use in query modification.
+        // phpcs:ignore WordPress.Security.NonceVerification.Missing -- JSF handles its own nonce.
+        if ( isset( $_POST['query'] ) ) {
+            // phpcs:ignore WordPress.Security.NonceVerification.Missing
+            $query_data = $_POST['query'];
+            if ( is_string( $query_data ) ) {
+                $query_data = json_decode( stripslashes( $query_data ), true );
+            }
+
+            if ( is_array( $query_data ) && isset( $query_data['tax_query'] ) ) {
+                $this->current_tax_filters = $query_data['tax_query'];
+            }
+        }
+    }
+
+    /**
+     * Handle JetSmartFilters search query in pre_get_posts.
+     *
+     * @param WP_Query $query Query object.
+     */
+    public function handle_jsf_search_query( $query ) {
+        // Only handle JSF AJAX requests.
+        if ( ! wp_doing_ajax() ) {
+            return;
+        }
+
+        // Check if this is a JSF request.
+        // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+        $action = isset( $_REQUEST['action'] ) ? sanitize_text_field( wp_unslash( $_REQUEST['action'] ) ) : '';
+        if ( 'jet_smart_filters' !== $action ) {
+            return;
+        }
+
+        // Don't modify admin queries unless AJAX.
+        if ( is_admin() && ! wp_doing_ajax() ) {
+            return;
+        }
+    }
+
+    /**
+     * Capture JetSmartFilters query to extract active filters for other search widgets.
+     * NOTE: This does NOT modify the JSF query - JSF handles its own search + filters.
      *
      * @param array $query Query arguments.
      * @return array
      */
-    public function capture_jsf_query( $query ) {
-        // Extract taxonomy filters from query.
-        if ( isset( $query['tax_query'] ) && is_array( $query['tax_query'] ) ) {
-            $filters = array(
-                'categories' => array(),
-                'tags'       => array(),
-                'taxonomies' => array(),
-            );
+    public function modify_jsf_query( $query ) {
+        // Extract taxonomy filters from query and store them for non-JSF search widgets.
+        $filters = array(
+            'categories' => array(),
+            'tags'       => array(),
+            'taxonomies' => array(),
+        );
 
+        if ( isset( $query['tax_query'] ) && is_array( $query['tax_query'] ) ) {
             foreach ( $query['tax_query'] as $tax_query ) {
                 if ( ! is_array( $tax_query ) || ! isset( $tax_query['taxonomy'] ) ) {
                     continue;
@@ -115,10 +173,12 @@ class Jezweb_JetSmartFilters_Integration {
                 }
             }
 
-            // Store for search integration.
+            // Store for non-JSF search widget integration (WordPress default, Elementor, etc.).
             $this->store_active_filters( $filters );
         }
 
+        // Don't modify the query - let JetSmartFilters handle its own search + filter combination.
+        // This function only captures the filters for use with OTHER search widgets.
         return $query;
     }
 
