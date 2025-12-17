@@ -132,54 +132,151 @@ class Jezweb_JetSmartFilters_Integration {
     }
 
     /**
-     * Capture JetSmartFilters query to extract active filters for other search widgets.
-     * NOTE: This does NOT modify the JSF query - JSF handles its own search + filters.
+     * Modify JetSmartFilters query to ensure search respects active taxonomy filters.
      *
      * @param array $query Query arguments.
      * @return array
      */
     public function modify_jsf_query( $query ) {
-        // Extract taxonomy filters from query and store them for non-JSF search widgets.
-        $filters = array(
-            'categories' => array(),
-            'tags'       => array(),
-            'taxonomies' => array(),
-        );
+        // Check if this is a search query.
+        $is_search = ! empty( $query['s'] );
 
-        if ( isset( $query['tax_query'] ) && is_array( $query['tax_query'] ) ) {
-            foreach ( $query['tax_query'] as $tax_query ) {
-                if ( ! is_array( $tax_query ) || ! isset( $tax_query['taxonomy'] ) ) {
-                    continue;
-                }
+        // Get stored filters from our transient (set by JavaScript when checkboxes are clicked).
+        $stored_filters = $this->get_stored_filters();
 
-                $taxonomy = $tax_query['taxonomy'];
-                $terms    = isset( $tax_query['terms'] ) ? (array) $tax_query['terms'] : array();
+        // Also extract any taxonomy filters already in the query.
+        $query_filters = $this->extract_filters_from_query( $query );
 
-                if ( empty( $terms ) ) {
-                    continue;
-                }
+        // Merge stored filters with query filters.
+        $all_categories = array_unique( array_merge(
+            $stored_filters['categories'],
+            $query_filters['categories']
+        ) );
+        $all_tags = array_unique( array_merge(
+            $stored_filters['tags'],
+            $query_filters['tags']
+        ) );
 
-                // Categorize by taxonomy type.
-                if ( in_array( $taxonomy, array( 'product_cat', 'category' ), true ) ) {
-                    $filters['categories'] = array_merge( $filters['categories'], $terms );
-                } elseif ( in_array( $taxonomy, array( 'product_tag', 'post_tag' ), true ) ) {
-                    $filters['tags'] = array_merge( $filters['tags'], $terms );
-                } else {
-                    $key = 'jsf_' . $taxonomy;
-                    if ( ! isset( $filters['taxonomies'][ $key ] ) ) {
-                        $filters['taxonomies'][ $key ] = array();
+        // If this is a search AND we have category/tag filters, ensure they're applied.
+        if ( $is_search && ( ! empty( $all_categories ) || ! empty( $all_tags ) ) ) {
+            // Build or update tax_query.
+            if ( ! isset( $query['tax_query'] ) || ! is_array( $query['tax_query'] ) ) {
+                $query['tax_query'] = array();
+            }
+
+            // Check if category filter already exists in tax_query.
+            $has_cat_filter = false;
+            $has_tag_filter = false;
+
+            foreach ( $query['tax_query'] as $tq ) {
+                if ( is_array( $tq ) && isset( $tq['taxonomy'] ) ) {
+                    if ( in_array( $tq['taxonomy'], array( 'product_cat', 'category' ), true ) ) {
+                        $has_cat_filter = true;
                     }
-                    $filters['taxonomies'][ $key ] = array_merge( $filters['taxonomies'][ $key ], $terms );
+                    if ( in_array( $tq['taxonomy'], array( 'product_tag', 'post_tag' ), true ) ) {
+                        $has_tag_filter = true;
+                    }
                 }
             }
 
-            // Store for non-JSF search widget integration (WordPress default, Elementor, etc.).
-            $this->store_active_filters( $filters );
+            // Add category filter if not present.
+            if ( ! $has_cat_filter && ! empty( $all_categories ) ) {
+                $query['tax_query'][] = array(
+                    'taxonomy' => 'product_cat',
+                    'field'    => is_numeric( $all_categories[0] ) ? 'term_id' : 'slug',
+                    'terms'    => $all_categories,
+                    'operator' => 'IN',
+                );
+            }
+
+            // Add tag filter if not present.
+            if ( ! $has_tag_filter && ! empty( $all_tags ) ) {
+                $query['tax_query'][] = array(
+                    'taxonomy' => 'product_tag',
+                    'field'    => is_numeric( $all_tags[0] ) ? 'term_id' : 'slug',
+                    'terms'    => $all_tags,
+                    'operator' => 'IN',
+                );
+            }
+
+            // Set relation to AND if multiple tax queries.
+            if ( count( $query['tax_query'] ) > 1 ) {
+                $query['tax_query']['relation'] = 'AND';
+            }
+
+            // Debug logging.
+            if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+                error_log( 'Jezweb Search Result: Modified JSF search query - search: ' . $query['s'] . ', categories: ' . implode( ',', $all_categories ) . ', tags: ' . implode( ',', $all_tags ) );
+            }
         }
 
-        // Don't modify the query - let JetSmartFilters handle its own search + filter combination.
-        // This function only captures the filters for use with OTHER search widgets.
+        // Store current filters for other integrations.
+        $this->store_active_filters( array(
+            'categories' => $all_categories,
+            'tags'       => $all_tags,
+            'taxonomies' => array(),
+        ) );
+
         return $query;
+    }
+
+    /**
+     * Get stored filters from transient.
+     *
+     * @return array
+     */
+    private function get_stored_filters() {
+        $user_id       = get_current_user_id();
+        $transient_key = 'jezweb_search_filters_' . ( $user_id ? $user_id : md5( $this->get_client_ip() ) );
+        $filters       = get_transient( $transient_key );
+
+        if ( ! is_array( $filters ) ) {
+            $filters = array(
+                'categories' => array(),
+                'tags'       => array(),
+                'taxonomies' => array(),
+            );
+        }
+
+        return $filters;
+    }
+
+    /**
+     * Extract taxonomy filters from query.
+     *
+     * @param array $query Query arguments.
+     * @return array
+     */
+    private function extract_filters_from_query( $query ) {
+        $filters = array(
+            'categories' => array(),
+            'tags'       => array(),
+        );
+
+        if ( ! isset( $query['tax_query'] ) || ! is_array( $query['tax_query'] ) ) {
+            return $filters;
+        }
+
+        foreach ( $query['tax_query'] as $tax_query ) {
+            if ( ! is_array( $tax_query ) || ! isset( $tax_query['taxonomy'] ) ) {
+                continue;
+            }
+
+            $taxonomy = $tax_query['taxonomy'];
+            $terms    = isset( $tax_query['terms'] ) ? (array) $tax_query['terms'] : array();
+
+            if ( empty( $terms ) ) {
+                continue;
+            }
+
+            if ( in_array( $taxonomy, array( 'product_cat', 'category' ), true ) ) {
+                $filters['categories'] = array_merge( $filters['categories'], $terms );
+            } elseif ( in_array( $taxonomy, array( 'product_tag', 'post_tag' ), true ) ) {
+                $filters['tags'] = array_merge( $filters['tags'], $terms );
+            }
+        }
+
+        return $filters;
     }
 
     /**

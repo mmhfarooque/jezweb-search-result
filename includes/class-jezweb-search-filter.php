@@ -113,12 +113,6 @@ class Jezweb_Search_Filter {
             return;
         }
 
-        // Don't interfere with JetSmartFilters AJAX requests.
-        // JSF handles its own search + filter combination.
-        if ( $this->is_jsf_ajax_request() ) {
-            return;
-        }
-
         // Only modify search queries.
         if ( ! $query->is_search() ) {
             return;
@@ -163,11 +157,6 @@ class Jezweb_Search_Filter {
      * @return array
      */
     public function modify_wc_tax_query( $tax_query, $query ) {
-        // Don't interfere with JetSmartFilters AJAX requests.
-        if ( $this->is_jsf_ajax_request() ) {
-            return $tax_query;
-        }
-
         // Check if query object has is_search method and if it's a search query.
         $is_search = false;
         if ( is_object( $query ) && method_exists( $query, 'is_search' ) ) {

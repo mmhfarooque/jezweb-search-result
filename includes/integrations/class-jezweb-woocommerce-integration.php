@@ -105,11 +105,6 @@ class Jezweb_WooCommerce_Integration {
      * @param WP_Query $query Query object.
      */
     public function modify_product_query( $query ) {
-        // Don't interfere with JetSmartFilters AJAX requests.
-        if ( $this->is_jsf_ajax_request() ) {
-            return;
-        }
-
         // Check if query object has is_search method.
         $is_search = false;
         if ( is_object( $query ) && method_exists( $query, 'is_search' ) ) {
