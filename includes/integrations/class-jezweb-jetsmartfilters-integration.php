@@ -104,6 +104,9 @@ class Jezweb_JetSmartFilters_Integration {
         // Add posts_search filter to replace WordPress default search with our title-only search.
         add_filter( 'posts_search', array( $this, 'filter_posts_search' ), 999, 2 );
 
+        // Add posts_clauses filter to catch ALL queries (JSF may bypass posts_search).
+        add_filter( 'posts_clauses', array( $this, 'filter_posts_clauses' ), 999, 2 );
+
         // Add posts_where filter as a fallback.
         add_filter( 'posts_where', array( $this, 'filter_posts_where' ), 999, 2 );
     }
@@ -445,6 +448,131 @@ class Jezweb_JetSmartFilters_Integration {
         }
 
         return $where;
+    }
+
+    /**
+     * Filter posts_clauses to catch ALL queries including JSF queries.
+     * This is more reliable than posts_search which JSF may bypass.
+     *
+     * @param array    $clauses SQL clauses array (where, groupby, join, orderby, distinct, fields, limits).
+     * @param WP_Query $query   The WP_Query instance.
+     * @return array
+     */
+    public function filter_posts_clauses( $clauses, $query ) {
+        global $wpdb;
+
+        // Safety check - always return original clauses if anything goes wrong.
+        try {
+            // Only apply during JSF AJAX requests.
+            if ( ! wp_doing_ajax() ) {
+                return $clauses;
+            }
+
+            // Check if this is a JSF request.
+            // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+            $action = isset( $_REQUEST['action'] ) ? sanitize_text_field( wp_unslash( $_REQUEST['action'] ) ) : '';
+            if ( 'jet_smart_filters' !== $action ) {
+                return $clauses;
+            }
+
+            // Prevent multiple modifications.
+            if ( $this->sql_modified ) {
+                return $clauses;
+            }
+
+            // Ensure $query is a WP_Query object with get() method.
+            if ( ! is_object( $query ) || ! method_exists( $query, 'get' ) ) {
+                return $clauses;
+            }
+
+            // Only apply to product queries.
+            $post_type = $query->get( 'post_type' );
+            if ( ! empty( $post_type ) && 'product' !== $post_type && ! ( is_array( $post_type ) && in_array( 'product', $post_type, true ) ) ) {
+                return $clauses;
+            }
+
+            // Get search term from our captured data OR from query 's' parameter.
+            $search_term = $this->current_search_term;
+
+            // If not captured yet, try to get from the query itself.
+            if ( empty( $search_term ) ) {
+                $search_term = $query->get( 's' );
+            }
+
+            // Debug logging.
+            if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+                error_log( 'Jezweb Search Result: filter_posts_clauses called - search_term: "' . ( $search_term ?: 'empty' ) . '", where clause length: ' . strlen( $clauses['where'] ) );
+            }
+
+            // If no search term captured, return original clauses.
+            if ( empty( $search_term ) ) {
+                return $clauses;
+            }
+
+            // Get search scope setting.
+            $settings     = get_option( 'jezweb_search_result_settings', array() );
+            $search_scope = isset( $settings['search_scope'] ) ? $settings['search_scope'] : 'title_only';
+
+            // Build search condition based on scope setting.
+            $search_term_escaped = '%' . $wpdb->esc_like( $search_term ) . '%';
+
+            // Check if the WHERE clause already has our search condition.
+            if ( strpos( $clauses['where'], $wpdb->esc_like( $search_term ) ) !== false ) {
+                // Search condition already exists - we need to check if it's title-only.
+                if ( 'title_only' === $search_scope ) {
+                    // Remove any existing post_content or post_excerpt LIKE conditions for our search term.
+                    // Pattern to match: OR (wp_posts.post_content LIKE '%term%')
+                    $content_pattern = "/" . preg_quote( " OR ({$wpdb->posts}.post_content LIKE ", '/' ) . "'%" . preg_quote( $wpdb->esc_like( $search_term ), '/' ) . "%'\)/i";
+                    $excerpt_pattern = "/" . preg_quote( " OR ({$wpdb->posts}.post_excerpt LIKE ", '/' ) . "'%" . preg_quote( $wpdb->esc_like( $search_term ), '/' ) . "%'\)/i";
+
+                    $clauses['where'] = preg_replace( $content_pattern, '', $clauses['where'] );
+                    $clauses['where'] = preg_replace( $excerpt_pattern, '', $clauses['where'] );
+
+                    // Also handle common WordPress search format.
+                    // Pattern: OR (wp_posts.post_excerpt LIKE '%term%') OR (wp_posts.post_content LIKE '%term%')
+                    $wp_search_pattern = "/" . preg_quote( "OR ({$wpdb->posts}.post_excerpt LIKE ", '/' ) . "'%" . preg_quote( $wpdb->esc_like( $search_term ), '/' ) . "%'\) OR \({$wpdb->posts}\.post_content LIKE '%" . preg_quote( $wpdb->esc_like( $search_term ), '/' ) . "%'\)/i";
+                    $clauses['where'] = preg_replace( $wp_search_pattern, '', $clauses['where'] );
+
+                    if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+                        error_log( 'Jezweb Search Result: Removed content/excerpt search conditions for title-only scope' );
+                    }
+                }
+            } else {
+                // No search condition exists - add our own.
+                if ( 'title_only' === $search_scope ) {
+                    // Search only in product title.
+                    $search_where = $wpdb->prepare(
+                        " AND ({$wpdb->posts}.post_title LIKE %s)",
+                        $search_term_escaped
+                    );
+                } else {
+                    // Search in title, content, and excerpt.
+                    $search_where = $wpdb->prepare(
+                        " AND ({$wpdb->posts}.post_title LIKE %s OR {$wpdb->posts}.post_content LIKE %s OR {$wpdb->posts}.post_excerpt LIKE %s)",
+                        $search_term_escaped,
+                        $search_term_escaped,
+                        $search_term_escaped
+                    );
+                }
+
+                $clauses['where'] .= $search_where;
+
+                if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+                    error_log( 'Jezweb Search Result: Added search condition in posts_clauses for term "' . $search_term . '" with scope "' . $search_scope . '"' );
+                }
+            }
+
+            // Mark as modified to prevent duplicate modifications.
+            $this->sql_modified = true;
+
+        } catch ( Exception $e ) {
+            // Log error but don't break the query.
+            if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+                error_log( 'Jezweb Search Result: Error in posts_clauses filter: ' . $e->getMessage() );
+            }
+        }
+
+        return $clauses;
     }
 
     /**
