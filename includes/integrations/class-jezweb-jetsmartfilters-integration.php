@@ -101,8 +101,8 @@ class Jezweb_JetSmartFilters_Integration {
         add_action( 'wp_ajax_jet_smart_filters', array( $this, 'intercept_jsf_ajax' ), 1 );
         add_action( 'wp_ajax_nopriv_jet_smart_filters', array( $this, 'intercept_jsf_ajax' ), 1 );
 
-        // Add posts_where filter to enforce search at SQL level.
-        add_filter( 'posts_where', array( $this, 'filter_posts_where_for_search' ), 999, 2 );
+        // Add posts_search filter to completely control search behavior.
+        add_filter( 'posts_search', array( $this, 'filter_posts_search' ), 999, 2 );
     }
 
     /**
@@ -110,6 +110,10 @@ class Jezweb_JetSmartFilters_Integration {
      */
     public function intercept_jsf_ajax() {
         // phpcs:ignore WordPress.Security.NonceVerification.Missing -- JSF handles its own nonce.
+
+        // Reset flags for new request.
+        $this->sql_modified = false;
+        $this->current_search_term = '';
 
         // Capture filter data from the AJAX request for use in query modification.
         if ( isset( $_POST['query'] ) ) {
@@ -196,44 +200,44 @@ class Jezweb_JetSmartFilters_Integration {
     }
 
     /**
-     * Filter posts_where to enforce search term at SQL level.
-     * This ensures the search is applied even if JSF ignores the 's' parameter.
+     * Filter posts_search to completely control search behavior.
+     * This replaces the default WordPress search SQL with our custom search based on settings.
      *
-     * @param string   $where    The WHERE clause of the query.
+     * @param string   $search   The search SQL clause.
      * @param WP_Query $query    The WP_Query instance.
      * @return string
      */
-    public function filter_posts_where_for_search( $where, $query ) {
+    public function filter_posts_search( $search, $query ) {
         global $wpdb;
 
-        // Safety check - always return original where if anything goes wrong.
+        // Safety check - always return original search if anything goes wrong.
         try {
-            // Prevent multiple modifications.
-            if ( $this->sql_modified ) {
-                return $where;
-            }
-
             // Only apply during JSF AJAX requests.
             if ( ! wp_doing_ajax() ) {
-                return $where;
+                return $search;
             }
 
             // Check if this is a JSF request.
             // phpcs:ignore WordPress.Security.NonceVerification.Recommended
             $action = isset( $_REQUEST['action'] ) ? sanitize_text_field( wp_unslash( $_REQUEST['action'] ) ) : '';
             if ( 'jet_smart_filters' !== $action ) {
-                return $where;
+                return $search;
+            }
+
+            // Prevent multiple modifications.
+            if ( $this->sql_modified ) {
+                return $search;
             }
 
             // Ensure $query is a WP_Query object with get() method.
             if ( ! is_object( $query ) || ! method_exists( $query, 'get' ) ) {
-                return $where;
+                return $search;
             }
 
-            // Only apply to main product queries.
+            // Only apply to product queries.
             $post_type = $query->get( 'post_type' );
             if ( ! empty( $post_type ) && 'product' !== $post_type && ! ( is_array( $post_type ) && in_array( 'product', $post_type, true ) ) ) {
-                return $where;
+                return $search;
             }
 
             // Get search term from our captured data or query.
@@ -247,14 +251,9 @@ class Jezweb_JetSmartFilters_Integration {
                 }
             }
 
-            // If no search term, return original where clause.
+            // If no search term, return original search clause.
             if ( empty( $search_term ) ) {
-                return $where;
-            }
-
-            // Check if search is already applied in WHERE clause.
-            if ( stripos( $where, 'post_title LIKE' ) !== false || stripos( $where, 'post_content LIKE' ) !== false ) {
-                return $where;
+                return $search;
             }
 
             // Get search scope setting.
@@ -266,13 +265,13 @@ class Jezweb_JetSmartFilters_Integration {
 
             if ( 'title_only' === $search_scope ) {
                 // Search only in product title.
-                $search_where = $wpdb->prepare(
+                $custom_search = $wpdb->prepare(
                     " AND ({$wpdb->posts}.post_title LIKE %s)",
                     $search_term_escaped
                 );
             } else {
                 // Search in title, content, and excerpt.
-                $search_where = $wpdb->prepare(
+                $custom_search = $wpdb->prepare(
                     " AND ({$wpdb->posts}.post_title LIKE %s OR {$wpdb->posts}.post_content LIKE %s OR {$wpdb->posts}.post_excerpt LIKE %s)",
                     $search_term_escaped,
                     $search_term_escaped,
@@ -280,24 +279,25 @@ class Jezweb_JetSmartFilters_Integration {
                 );
             }
 
-            $where .= $search_where;
-
             // Mark as modified to prevent duplicate modifications.
             $this->sql_modified = true;
 
             // Debug logging.
             if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
-                error_log( 'Jezweb Search Result: Added SQL search condition for term: ' . $search_term );
+                error_log( 'Jezweb Search Result: Replaced search SQL for term "' . $search_term . '" with scope "' . $search_scope . '"' );
             }
+
+            // Return our custom search SQL, completely replacing the default.
+            return $custom_search;
 
         } catch ( Exception $e ) {
             // Log error but don't break the query.
             if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
-                error_log( 'Jezweb Search Result: Error in posts_where filter: ' . $e->getMessage() );
+                error_log( 'Jezweb Search Result: Error in posts_search filter: ' . $e->getMessage() );
             }
         }
 
-        return $where;
+        return $search;
     }
 
     /**
