@@ -348,6 +348,14 @@ class Jezweb_JetSmartFilters_Integration {
             $search_term = $this->current_search_term;
         }
 
+        // IMPORTANT: Store the search term for filter_posts_where to use.
+        if ( ! empty( $search_term ) && empty( $this->current_search_term ) ) {
+            $this->current_search_term = sanitize_text_field( $search_term );
+            if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+                error_log( 'Jezweb Search Result: Captured search term in modify_jsf_query: "' . $this->current_search_term . '"' );
+            }
+        }
+
         $is_search = ! empty( $search_term );
 
         // If we have a search term but it's not in the query, add it.
