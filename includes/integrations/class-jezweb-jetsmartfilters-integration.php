@@ -491,17 +491,23 @@ class Jezweb_JetSmartFilters_Integration {
                 return $clauses;
             }
 
-            // Get search term from our captured data OR from query 's' parameter.
+            // Check for our custom title-only search parameter first.
+            $title_only_search = $query->get( '_jezweb_title_only_search' );
+
+            // Get search term from our captured data, custom param, or query 's' parameter.
             $search_term = $this->current_search_term;
 
-            // If not captured yet, try to get from the query itself.
+            // If not captured yet, try custom param or 's'.
+            if ( empty( $search_term ) && ! empty( $title_only_search ) ) {
+                $search_term = $title_only_search;
+            }
             if ( empty( $search_term ) ) {
                 $search_term = $query->get( 's' );
             }
 
             // Debug logging.
             if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
-                error_log( 'Jezweb Search Result: filter_posts_clauses called - search_term: "' . ( $search_term ?: 'empty' ) . '", where clause length: ' . strlen( $clauses['where'] ) );
+                error_log( 'Jezweb Search Result: filter_posts_clauses called - search_term: "' . ( $search_term ?: 'empty' ) . '", title_only_param: "' . ( $title_only_search ?: 'none' ) . '", where clause length: ' . strlen( $clauses['where'] ) );
             }
 
             // If no search term captured, return original clauses.
@@ -509,9 +515,12 @@ class Jezweb_JetSmartFilters_Integration {
                 return $clauses;
             }
 
-            // Get search scope setting.
-            $settings     = get_option( 'jezweb_search_result_settings', array() );
-            $search_scope = isset( $settings['search_scope'] ) ? $settings['search_scope'] : 'title_only';
+            // Determine search scope - if _jezweb_title_only_search is set, force title_only.
+            $search_scope = 'title_only';
+            if ( empty( $title_only_search ) ) {
+                $settings     = get_option( 'jezweb_search_result_settings', array() );
+                $search_scope = isset( $settings['search_scope'] ) ? $settings['search_scope'] : 'title_only';
+            }
 
             // Build search condition based on scope setting.
             $search_term_escaped = '%' . $wpdb->esc_like( $search_term ) . '%';
@@ -602,9 +611,37 @@ class Jezweb_JetSmartFilters_Integration {
 
         $is_search = ! empty( $search_term );
 
-        // If we have a search term but it's not in the query, add it.
-        if ( $is_search && empty( $query['s'] ) ) {
-            $query['s'] = $search_term;
+        // If we have a search term, configure the query for our custom search.
+        if ( $is_search ) {
+            // Add search term to query if not present.
+            if ( empty( $query['s'] ) ) {
+                $query['s'] = $search_term;
+            }
+
+            // CRITICAL: Force WordPress to run query filters (JSF may set suppress_filters => true).
+            $query['suppress_filters'] = false;
+
+            // Store search term for our filters to use.
+            $this->current_search_term = $search_term;
+
+            // Get search scope setting.
+            $settings     = get_option( 'jezweb_search_result_settings', array() );
+            $search_scope = isset( $settings['search_scope'] ) ? $settings['search_scope'] : 'title_only';
+
+            // For title-only search, we need to disable WordPress default search
+            // and use our own implementation via posts_clauses filter.
+            if ( 'title_only' === $search_scope ) {
+                // Mark that we need title-only search.
+                $query['_jezweb_title_only_search'] = $search_term;
+
+                // Remove 's' parameter to prevent WordPress default search from running,
+                // but our posts_clauses filter will add the title-only condition.
+                unset( $query['s'] );
+
+                if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+                    error_log( 'Jezweb Search Result: Configured title-only search for term "' . $search_term . '"' );
+                }
+            }
         }
 
         // Get stored filters from our transient (set by JavaScript when checkboxes are clicked).
