@@ -124,7 +124,23 @@ class Jezweb_JetSmartFilters_Integration {
         if ( isset( $_POST['query'] ) ) {
             // phpcs:ignore WordPress.Security.NonceVerification.Missing
             $query_data = $_POST['query'];
-            if ( is_string( $query_data ) ) {
+
+            // Handle URL-encoded query string format (e.g., "s=Homework&post_type=product")
+            if ( is_string( $query_data ) && strpos( $query_data, '=' ) !== false && strpos( $query_data, '{' ) === false ) {
+                parse_str( $query_data, $parsed_query );
+                if ( ! empty( $parsed_query['s'] ) ) {
+                    $this->current_search_term = sanitize_text_field( $parsed_query['s'] );
+                }
+                if ( ! empty( $parsed_query['_s'] ) ) {
+                    $this->current_search_term = sanitize_text_field( $parsed_query['_s'] );
+                }
+                if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+                    error_log( 'Jezweb Search Result: Parsed query string, found s=' . ( $this->current_search_term ?: 'none' ) );
+                }
+            }
+
+            // Handle JSON format
+            if ( is_string( $query_data ) && strpos( $query_data, '{' ) !== false ) {
                 $query_data = json_decode( stripslashes( $query_data ), true );
             }
 
