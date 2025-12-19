@@ -95,6 +95,14 @@ class Jezweb_Admin_Settings {
             )
         );
 
+        add_settings_field(
+            'search_scope',
+            __( 'Search Scope', 'jezweb-search-result' ),
+            array( $this, 'render_search_scope_field' ),
+            $this->page_slug,
+            'jezweb_general_section'
+        );
+
         // Taxonomies Section
         add_settings_section(
             'jezweb_taxonomies_section',
@@ -221,6 +229,12 @@ class Jezweb_Admin_Settings {
         $sanitized['enable_jetsearch']   = isset( $input['enable_jetsearch'] ) ? true : false;
         $sanitized['enable_jetfilters']  = isset( $input['enable_jetfilters'] ) ? true : false;
         $sanitized['enable_woocommerce'] = isset( $input['enable_woocommerce'] ) ? true : false;
+
+        // Search scope field
+        $valid_scopes = array( 'title_only', 'title_excerpt_content' );
+        $sanitized['search_scope'] = isset( $input['search_scope'] ) && in_array( $input['search_scope'], $valid_scopes, true )
+            ? $input['search_scope']
+            : 'title_only';
 
         // Text fields
         $sanitized['filter_param_prefix'] = isset( $input['filter_param_prefix'] )
@@ -447,6 +461,41 @@ class Jezweb_Admin_Settings {
                 ?>
             </span>
         <?php endif; ?>
+        <?php
+    }
+
+    /**
+     * Render search scope field.
+     */
+    public function render_search_scope_field() {
+        $options = get_option( $this->option_name, array() );
+        $value   = isset( $options['search_scope'] ) ? $options['search_scope'] : 'title_only';
+        ?>
+        <fieldset>
+            <label style="display: block; margin-bottom: 8px;">
+                <input type="radio"
+                       name="<?php echo esc_attr( $this->option_name . '[search_scope]' ); ?>"
+                       value="title_only"
+                       <?php checked( $value, 'title_only' ); ?>>
+                <strong><?php esc_html_e( 'Product Title Only', 'jezweb-search-result' ); ?></strong>
+                <span class="description" style="display: block; margin-left: 24px; color: #666;">
+                    <?php esc_html_e( 'Search only in product titles. Faster and more precise results.', 'jezweb-search-result' ); ?>
+                </span>
+            </label>
+            <label style="display: block; margin-bottom: 8px;">
+                <input type="radio"
+                       name="<?php echo esc_attr( $this->option_name . '[search_scope]' ); ?>"
+                       value="title_excerpt_content"
+                       <?php checked( $value, 'title_excerpt_content' ); ?>>
+                <strong><?php esc_html_e( 'Title, Excerpt & Content', 'jezweb-search-result' ); ?></strong>
+                <span class="description" style="display: block; margin-left: 24px; color: #666;">
+                    <?php esc_html_e( 'Search in product title, short description (excerpt), and full product description (content).', 'jezweb-search-result' ); ?>
+                </span>
+            </label>
+        </fieldset>
+        <p class="description" style="margin-top: 10px;">
+            <?php esc_html_e( 'Choose which product fields to include when searching. This affects JetSmartFilters search and other integrated search widgets.', 'jezweb-search-result' ); ?>
+        </p>
         <?php
     }
 

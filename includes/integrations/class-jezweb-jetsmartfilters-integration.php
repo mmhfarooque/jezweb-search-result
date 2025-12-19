@@ -257,15 +257,28 @@ class Jezweb_JetSmartFilters_Integration {
                 return $where;
             }
 
-            // Build search condition - search in title, content, and excerpt.
+            // Get search scope setting.
+            $settings     = get_option( 'jezweb_search_result_settings', array() );
+            $search_scope = isset( $settings['search_scope'] ) ? $settings['search_scope'] : 'title_only';
+
+            // Build search condition based on scope setting.
             $search_term_escaped = '%' . $wpdb->esc_like( $search_term ) . '%';
 
-            $search_where = $wpdb->prepare(
-                " AND ({$wpdb->posts}.post_title LIKE %s OR {$wpdb->posts}.post_content LIKE %s OR {$wpdb->posts}.post_excerpt LIKE %s)",
-                $search_term_escaped,
-                $search_term_escaped,
-                $search_term_escaped
-            );
+            if ( 'title_only' === $search_scope ) {
+                // Search only in product title.
+                $search_where = $wpdb->prepare(
+                    " AND ({$wpdb->posts}.post_title LIKE %s)",
+                    $search_term_escaped
+                );
+            } else {
+                // Search in title, content, and excerpt.
+                $search_where = $wpdb->prepare(
+                    " AND ({$wpdb->posts}.post_title LIKE %s OR {$wpdb->posts}.post_content LIKE %s OR {$wpdb->posts}.post_excerpt LIKE %s)",
+                    $search_term_escaped,
+                    $search_term_escaped,
+                    $search_term_escaped
+                );
+            }
 
             $where .= $search_where;
 
