@@ -591,6 +591,8 @@ class Jezweb_JetSmartFilters_Integration {
      * @return array
      */
     public function modify_jsf_query( $query ) {
+        global $wpdb;
+
         // Get search term from query or from captured AJAX data.
         $search_term = '';
         if ( ! empty( $query['s'] ) ) {
@@ -611,36 +613,67 @@ class Jezweb_JetSmartFilters_Integration {
 
         $is_search = ! empty( $search_term );
 
-        // If we have a search term, configure the query for our custom search.
+        // If we have a search term, use post__in approach (JSF bypasses WP query filters).
         if ( $is_search ) {
-            // Add search term to query if not present.
-            if ( empty( $query['s'] ) ) {
-                $query['s'] = $search_term;
-            }
-
-            // CRITICAL: Force WordPress to run query filters (JSF may set suppress_filters => true).
-            $query['suppress_filters'] = false;
-
-            // Store search term for our filters to use.
-            $this->current_search_term = $search_term;
-
             // Get search scope setting.
             $settings     = get_option( 'jezweb_search_result_settings', array() );
             $search_scope = isset( $settings['search_scope'] ) ? $settings['search_scope'] : 'title_only';
 
-            // For title-only search, we need to disable WordPress default search
-            // and use our own implementation via posts_clauses filter.
+            // Build our own SQL query to find matching products.
+            $search_term_escaped = '%' . $wpdb->esc_like( $search_term ) . '%';
+
             if ( 'title_only' === $search_scope ) {
-                // Mark that we need title-only search.
-                $query['_jezweb_title_only_search'] = $search_term;
+                // Search only in product title.
+                $sql = $wpdb->prepare(
+                    "SELECT ID FROM {$wpdb->posts}
+                     WHERE post_type = 'product'
+                     AND post_status = 'publish'
+                     AND post_title LIKE %s",
+                    $search_term_escaped
+                );
+            } else {
+                // Search in title, content, and excerpt.
+                $sql = $wpdb->prepare(
+                    "SELECT ID FROM {$wpdb->posts}
+                     WHERE post_type = 'product'
+                     AND post_status = 'publish'
+                     AND (post_title LIKE %s OR post_content LIKE %s OR post_excerpt LIKE %s)",
+                    $search_term_escaped,
+                    $search_term_escaped,
+                    $search_term_escaped
+                );
+            }
 
-                // Remove 's' parameter to prevent WordPress default search from running,
-                // but our posts_clauses filter will add the title-only condition.
-                unset( $query['s'] );
+            // Execute the query to get matching product IDs.
+            $matching_ids = $wpdb->get_col( $sql );
 
-                if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
-                    error_log( 'Jezweb Search Result: Configured title-only search for term "' . $search_term . '"' );
+            if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+                error_log( 'Jezweb Search Result: Title search for "' . $search_term . '" found ' . count( $matching_ids ) . ' products: ' . implode( ',', array_slice( $matching_ids, 0, 10 ) ) );
+            }
+
+            // If we found matching products, restrict query to those IDs.
+            if ( ! empty( $matching_ids ) ) {
+                // If post__in already exists, intersect with our results.
+                if ( ! empty( $query['post__in'] ) ) {
+                    $query['post__in'] = array_values( array_intersect( (array) $query['post__in'], $matching_ids ) );
+                    // If intersection is empty, no products match both conditions.
+                    if ( empty( $query['post__in'] ) ) {
+                        $query['post__in'] = array( 0 ); // Return no results.
+                    }
+                } else {
+                    $query['post__in'] = $matching_ids;
                 }
+            } else {
+                // No products match the search term - force empty results.
+                $query['post__in'] = array( 0 );
+            }
+
+            // Remove 's' parameter to prevent WordPress default search from also running.
+            unset( $query['s'] );
+            unset( $query['_s'] );
+
+            if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+                error_log( 'Jezweb Search Result: Set post__in to ' . count( $query['post__in'] ) . ' IDs for search "' . $search_term . '" with scope "' . $search_scope . '"' );
             }
         }
 
