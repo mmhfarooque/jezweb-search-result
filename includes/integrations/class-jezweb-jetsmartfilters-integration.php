@@ -101,7 +101,10 @@ class Jezweb_JetSmartFilters_Integration {
         add_action( 'wp_ajax_jet_smart_filters', array( $this, 'intercept_jsf_ajax' ), 1 );
         add_action( 'wp_ajax_nopriv_jet_smart_filters', array( $this, 'intercept_jsf_ajax' ), 1 );
 
-        // Add posts_where filter to enforce our search at SQL level.
+        // Add posts_search filter to replace WordPress default search with our title-only search.
+        add_filter( 'posts_search', array( $this, 'filter_posts_search' ), 999, 2 );
+
+        // Add posts_where filter as a fallback.
         add_filter( 'posts_where', array( $this, 'filter_posts_where' ), 999, 2 );
     }
 
@@ -255,6 +258,93 @@ class Jezweb_JetSmartFilters_Integration {
     }
 
     /**
+     * Filter posts_search to REPLACE WordPress default search with our custom search.
+     * This completely overrides the default search behavior.
+     *
+     * @param string   $search   The search SQL.
+     * @param WP_Query $query    The WP_Query instance.
+     * @return string
+     */
+    public function filter_posts_search( $search, $query ) {
+        global $wpdb;
+
+        // Only apply during JSF AJAX requests.
+        if ( ! wp_doing_ajax() ) {
+            return $search;
+        }
+
+        // Check if this is a JSF request.
+        // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+        $action = isset( $_REQUEST['action'] ) ? sanitize_text_field( wp_unslash( $_REQUEST['action'] ) ) : '';
+        if ( 'jet_smart_filters' !== $action ) {
+            return $search;
+        }
+
+        // Ensure $query is a WP_Query object with get() method.
+        if ( ! is_object( $query ) || ! method_exists( $query, 'get' ) ) {
+            return $search;
+        }
+
+        // Only apply to product queries.
+        $post_type = $query->get( 'post_type' );
+        if ( ! empty( $post_type ) && 'product' !== $post_type && ! ( is_array( $post_type ) && in_array( 'product', $post_type, true ) ) ) {
+            return $search;
+        }
+
+        // Get search term from the query.
+        $search_term = $query->get( 's' );
+
+        // Also try our captured term.
+        if ( empty( $search_term ) ) {
+            $search_term = $this->current_search_term;
+        }
+
+        // Debug logging.
+        if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+            error_log( 'Jezweb Search Result: filter_posts_search called - search_term: "' . ( $search_term ?: 'empty' ) . '", original search SQL: ' . substr( $search, 0, 200 ) );
+        }
+
+        // If no search term, return original search SQL.
+        if ( empty( $search_term ) ) {
+            return $search;
+        }
+
+        // Get search scope setting.
+        $settings     = get_option( 'jezweb_search_result_settings', array() );
+        $search_scope = isset( $settings['search_scope'] ) ? $settings['search_scope'] : 'title_only';
+
+        // Build our custom search SQL.
+        $search_term_escaped = '%' . $wpdb->esc_like( $search_term ) . '%';
+
+        if ( 'title_only' === $search_scope ) {
+            // Search only in product title.
+            $custom_search = $wpdb->prepare(
+                " AND ({$wpdb->posts}.post_title LIKE %s)",
+                $search_term_escaped
+            );
+        } else {
+            // Search in title, content, and excerpt.
+            $custom_search = $wpdb->prepare(
+                " AND ({$wpdb->posts}.post_title LIKE %s OR {$wpdb->posts}.post_content LIKE %s OR {$wpdb->posts}.post_excerpt LIKE %s)",
+                $search_term_escaped,
+                $search_term_escaped,
+                $search_term_escaped
+            );
+        }
+
+        // Mark as modified to prevent duplicate modifications in posts_where.
+        $this->sql_modified = true;
+
+        // Debug logging.
+        if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+            error_log( 'Jezweb Search Result: Replaced search SQL with scope "' . $search_scope . '" for term "' . $search_term . '"' );
+        }
+
+        // Return our custom search SQL, completely replacing the default.
+        return $custom_search;
+    }
+
+    /**
      * Filter posts_where to enforce our search at SQL level.
      * This adds our search condition to ensure title-only (or full) search works.
      *
@@ -295,8 +385,18 @@ class Jezweb_JetSmartFilters_Integration {
                 return $where;
             }
 
-            // Get search term from our captured data.
+            // Get search term from our captured data OR from query 's' parameter.
             $search_term = $this->current_search_term;
+
+            // If not captured yet, try to get from the query itself.
+            if ( empty( $search_term ) ) {
+                $search_term = $query->get( 's' );
+            }
+
+            // Debug logging.
+            if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+                error_log( 'Jezweb Search Result: filter_posts_where called - search_term: "' . ( $search_term ?: 'empty' ) . '", post_type: ' . ( is_array( $post_type ) ? implode( ',', $post_type ) : $post_type ) );
+            }
 
             // If no search term captured, return original where clause.
             if ( empty( $search_term ) ) {
