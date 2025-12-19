@@ -3,7 +3,7 @@
  * Plugin Name: Jezweb Search Result
  * Plugin URI: https://jezweb.com.au/plugins/jezweb-search-result
  * Description: Enhances WordPress search to respect active category and tag filters. Search results are scoped to currently selected categories/tags in product archives, working seamlessly with Elementor, JetSearch, JetSmartFilters, and default WordPress search.
- * Version: 1.0.10
+ * Version: 1.0.11
  * Author: Jezweb
  * Author URI: https://jezweb.com.au
  * Developer: Mahmud Farooque
@@ -28,7 +28,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 /**
  * Plugin constants
  */
-define( 'JEZWEB_SEARCH_RESULT_VERSION', '1.0.10' );
+define( 'JEZWEB_SEARCH_RESULT_VERSION', '1.0.11' );
 define( 'JEZWEB_SEARCH_RESULT_PLUGIN_FILE', __FILE__ );
 define( 'JEZWEB_SEARCH_RESULT_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'JEZWEB_SEARCH_RESULT_PLUGIN_URL', plugin_dir_url( __FILE__ ) );

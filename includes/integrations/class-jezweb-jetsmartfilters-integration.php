@@ -101,8 +101,8 @@ class Jezweb_JetSmartFilters_Integration {
         add_action( 'wp_ajax_jet_smart_filters', array( $this, 'intercept_jsf_ajax' ), 1 );
         add_action( 'wp_ajax_nopriv_jet_smart_filters', array( $this, 'intercept_jsf_ajax' ), 1 );
 
-        // Add posts_search filter to completely control search behavior.
-        add_filter( 'posts_search', array( $this, 'filter_posts_search' ), 999, 2 );
+        // Add posts_where filter to enforce our search at SQL level.
+        add_filter( 'posts_where', array( $this, 'filter_posts_where' ), 999, 2 );
     }
 
     /**
@@ -114,6 +114,11 @@ class Jezweb_JetSmartFilters_Integration {
         // Reset flags for new request.
         $this->sql_modified = false;
         $this->current_search_term = '';
+
+        // Debug: Log all POST data to understand JSF request structure.
+        if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+            error_log( 'Jezweb Search Result: JSF AJAX POST keys: ' . implode( ', ', array_keys( $_POST ) ) );
+        }
 
         // Capture filter data from the AJAX request for use in query modification.
         if ( isset( $_POST['query'] ) ) {
@@ -128,11 +133,19 @@ class Jezweb_JetSmartFilters_Integration {
                     $this->current_tax_filters = $query_data['tax_query'];
                 }
                 // Capture search term from query.
-                if ( isset( $query_data['s'] ) ) {
+                if ( ! empty( $query_data['s'] ) ) {
                     $this->current_search_term = sanitize_text_field( $query_data['s'] );
                 }
-                if ( isset( $query_data['_s'] ) ) {
+                if ( ! empty( $query_data['_s'] ) ) {
                     $this->current_search_term = sanitize_text_field( $query_data['_s'] );
+                }
+                // Check for meta_query with search.
+                if ( isset( $query_data['meta_query'] ) && is_array( $query_data['meta_query'] ) ) {
+                    foreach ( $query_data['meta_query'] as $meta ) {
+                        if ( is_array( $meta ) && isset( $meta['key'] ) && $meta['key'] === '_search' && ! empty( $meta['value'] ) ) {
+                            $this->current_search_term = sanitize_text_field( $meta['value'] );
+                        }
+                    }
                 }
             }
         }
@@ -146,6 +159,10 @@ class Jezweb_JetSmartFilters_Integration {
                 $filters_data = json_decode( stripslashes( $filters_data ), true );
             }
 
+            if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+                error_log( 'Jezweb Search Result: JSF filters data: ' . wp_json_encode( $filters_data ) );
+            }
+
             if ( is_array( $filters_data ) ) {
                 foreach ( $filters_data as $filter ) {
                     if ( is_array( $filter ) ) {
@@ -153,8 +170,15 @@ class Jezweb_JetSmartFilters_Integration {
                         if ( isset( $filter['query_type'] ) && '_s' === $filter['query_type'] && ! empty( $filter['query_val'] ) ) {
                             $this->current_search_term = sanitize_text_field( $filter['query_val'] );
                         }
-                        // Also check query_var.
-                        if ( isset( $filter['query_var'] ) && in_array( $filter['query_var'], array( 's', '_s', 'search', 'query' ), true ) && ! empty( $filter['query_val'] ) ) {
+                        // Also check query_var for various search parameters.
+                        if ( isset( $filter['query_var'] ) && ! empty( $filter['query_val'] ) ) {
+                            $search_vars = array( 's', '_s', 'search', 'query', 'jet-smart-filters', '_search' );
+                            if ( in_array( $filter['query_var'], $search_vars, true ) ) {
+                                $this->current_search_term = sanitize_text_field( $filter['query_val'] );
+                            }
+                        }
+                        // Check for filter_type = search.
+                        if ( isset( $filter['filter_type'] ) && 'search' === $filter['filter_type'] && ! empty( $filter['query_val'] ) ) {
                             $this->current_search_term = sanitize_text_field( $filter['query_val'] );
                         }
                     }
@@ -164,14 +188,29 @@ class Jezweb_JetSmartFilters_Integration {
 
         // Check direct POST parameters for search.
         // phpcs:ignore WordPress.Security.NonceVerification.Missing
-        if ( empty( $this->current_search_term ) && isset( $_POST['search'] ) ) {
-            // phpcs:ignore WordPress.Security.NonceVerification.Missing
-            $this->current_search_term = sanitize_text_field( wp_unslash( $_POST['search'] ) );
+        $search_post_keys = array( 'search', 's', '_s', 'jet_search', 'search_query' );
+        foreach ( $search_post_keys as $key ) {
+            if ( empty( $this->current_search_term ) && ! empty( $_POST[ $key ] ) ) {
+                // phpcs:ignore WordPress.Security.NonceVerification.Missing
+                $this->current_search_term = sanitize_text_field( wp_unslash( $_POST[ $key ] ) );
+                break;
+            }
+        }
+
+        // Check REQUEST (covers both GET and POST).
+        // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+        if ( empty( $this->current_search_term ) && ! empty( $_REQUEST['s'] ) ) {
+            // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+            $this->current_search_term = sanitize_text_field( wp_unslash( $_REQUEST['s'] ) );
         }
 
         // Debug log.
-        if ( defined( 'WP_DEBUG' ) && WP_DEBUG && ! empty( $this->current_search_term ) ) {
-            error_log( 'Jezweb Search Result: Captured search term from JSF AJAX: ' . $this->current_search_term );
+        if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+            if ( ! empty( $this->current_search_term ) ) {
+                error_log( 'Jezweb Search Result: Captured search term: "' . $this->current_search_term . '"' );
+            } else {
+                error_log( 'Jezweb Search Result: No search term captured from JSF request' );
+            }
         }
     }
 
@@ -200,60 +239,52 @@ class Jezweb_JetSmartFilters_Integration {
     }
 
     /**
-     * Filter posts_search to completely control search behavior.
-     * This replaces the default WordPress search SQL with our custom search based on settings.
+     * Filter posts_where to enforce our search at SQL level.
+     * This adds our search condition to ensure title-only (or full) search works.
      *
-     * @param string   $search   The search SQL clause.
+     * @param string   $where    The WHERE clause.
      * @param WP_Query $query    The WP_Query instance.
      * @return string
      */
-    public function filter_posts_search( $search, $query ) {
+    public function filter_posts_where( $where, $query ) {
         global $wpdb;
 
-        // Safety check - always return original search if anything goes wrong.
+        // Safety check - always return original where if anything goes wrong.
         try {
             // Only apply during JSF AJAX requests.
             if ( ! wp_doing_ajax() ) {
-                return $search;
+                return $where;
             }
 
             // Check if this is a JSF request.
             // phpcs:ignore WordPress.Security.NonceVerification.Recommended
             $action = isset( $_REQUEST['action'] ) ? sanitize_text_field( wp_unslash( $_REQUEST['action'] ) ) : '';
             if ( 'jet_smart_filters' !== $action ) {
-                return $search;
+                return $where;
             }
 
             // Prevent multiple modifications.
             if ( $this->sql_modified ) {
-                return $search;
+                return $where;
             }
 
             // Ensure $query is a WP_Query object with get() method.
             if ( ! is_object( $query ) || ! method_exists( $query, 'get' ) ) {
-                return $search;
+                return $where;
             }
 
             // Only apply to product queries.
             $post_type = $query->get( 'post_type' );
             if ( ! empty( $post_type ) && 'product' !== $post_type && ! ( is_array( $post_type ) && in_array( 'product', $post_type, true ) ) ) {
-                return $search;
+                return $where;
             }
 
-            // Get search term from our captured data or query.
-            $search_term = '';
-            if ( ! empty( $this->current_search_term ) ) {
-                $search_term = $this->current_search_term;
-            } else {
-                $query_s = $query->get( 's' );
-                if ( ! empty( $query_s ) ) {
-                    $search_term = $query_s;
-                }
-            }
+            // Get search term from our captured data.
+            $search_term = $this->current_search_term;
 
-            // If no search term, return original search clause.
+            // If no search term captured, return original where clause.
             if ( empty( $search_term ) ) {
-                return $search;
+                return $where;
             }
 
             // Get search scope setting.
@@ -265,13 +296,13 @@ class Jezweb_JetSmartFilters_Integration {
 
             if ( 'title_only' === $search_scope ) {
                 // Search only in product title.
-                $custom_search = $wpdb->prepare(
+                $search_where = $wpdb->prepare(
                     " AND ({$wpdb->posts}.post_title LIKE %s)",
                     $search_term_escaped
                 );
             } else {
                 // Search in title, content, and excerpt.
-                $custom_search = $wpdb->prepare(
+                $search_where = $wpdb->prepare(
                     " AND ({$wpdb->posts}.post_title LIKE %s OR {$wpdb->posts}.post_content LIKE %s OR {$wpdb->posts}.post_excerpt LIKE %s)",
                     $search_term_escaped,
                     $search_term_escaped,
@@ -284,20 +315,20 @@ class Jezweb_JetSmartFilters_Integration {
 
             // Debug logging.
             if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
-                error_log( 'Jezweb Search Result: Replaced search SQL for term "' . $search_term . '" with scope "' . $search_scope . '"' );
+                error_log( 'Jezweb Search Result: Added search WHERE for term "' . $search_term . '" with scope "' . $search_scope . '"' );
             }
 
-            // Return our custom search SQL, completely replacing the default.
-            return $custom_search;
+            // Add our search condition to the WHERE clause.
+            $where .= $search_where;
 
         } catch ( Exception $e ) {
             // Log error but don't break the query.
             if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
-                error_log( 'Jezweb Search Result: Error in posts_search filter: ' . $e->getMessage() );
+                error_log( 'Jezweb Search Result: Error in posts_where filter: ' . $e->getMessage() );
             }
         }
 
-        return $search;
+        return $where;
     }
 
     /**
