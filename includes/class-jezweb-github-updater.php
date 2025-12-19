@@ -408,14 +408,26 @@ class Jezweb_GitHub_Updater {
             return $links;
         }
 
+        // Generate nonce URL for update check.
+        $update_url = wp_nonce_url(
+            admin_url( 'plugins.php?jezweb_check_updates=1' ),
+            'jezweb_check_updates_nonce'
+        );
+
         $links[] = sprintf(
             '<a href="%s">%s</a>',
-            esc_url( admin_url( 'plugins.php?jezweb_check_updates=1' ) ),
+            esc_url( $update_url ),
             esc_html__( 'Check for updates', 'jezweb-search-result' )
         );
 
-        // Handle manual update check.
+        // Handle manual update check with nonce verification.
+        // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Nonce is verified below.
         if ( isset( $_GET['jezweb_check_updates'] ) && current_user_can( 'update_plugins' ) ) {
+            // Verify nonce.
+            if ( ! isset( $_GET['_wpnonce'] ) || ! wp_verify_nonce( sanitize_text_field( wp_unslash( $_GET['_wpnonce'] ) ), 'jezweb_check_updates_nonce' ) ) {
+                wp_die( esc_html__( 'Security check failed.', 'jezweb-search-result' ) );
+            }
+
             delete_transient( 'jezweb_github_response' );
             delete_site_transient( 'update_plugins' );
 
